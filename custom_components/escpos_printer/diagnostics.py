@@ -8,12 +8,12 @@ from homeassistant.const import CONF_HOST, CONF_PORT
 from homeassistant.core import HomeAssistant
 
 from .const import (
-    DOMAIN,
     CONF_CODEPAGE,
-    CONF_PROFILE,
-    CONF_LINE_WIDTH,
     CONF_KEEPALIVE,
+    CONF_LINE_WIDTH,
+    CONF_PROFILE,
     CONF_STATUS_INTERVAL,
+    DOMAIN,
 )
 
 TO_REDACT = {CONF_HOST}
@@ -31,14 +31,17 @@ async def async_get_config_entry_diagnostics(
 
     runtime: dict[str, Any] = {}
     if adapter is not None:
+        # Get config once to avoid repeated nested getattr calls
+        config = getattr(adapter, "_config", None)
+        
         runtime = {
             "status": adapter.get_status(),
             "diagnostics": adapter.get_diagnostics(),
-            "profile": getattr(adapter, "_config", None).profile if getattr(adapter, "_config", None) else None,
-            "codepage": getattr(adapter, "_config", None).codepage if getattr(adapter, "_config", None) else None,
-            "line_width": getattr(adapter, "_config", None).line_width if getattr(adapter, "_config", None) else None,
-            "host": getattr(adapter, "_config", None).host if getattr(adapter, "_config", None) else None,
-            "port": getattr(adapter, "_config", None).port if getattr(adapter, "_config", None) else None,
+            "profile": config.profile if config else None,
+            "codepage": config.codepage if config else None,
+            "line_width": config.line_width if config else None,
+            "host": config.host if config else None,
+            "port": config.port if config else None,
             "keepalive": getattr(adapter, "_keepalive", None),
             "status_interval": getattr(adapter, "_status_interval", None),
         }
