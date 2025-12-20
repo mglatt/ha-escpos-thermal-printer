@@ -1,3 +1,5 @@
+"""Tests for config flow options and duplicate entry handling."""
+
 from unittest.mock import patch
 
 from homeassistant.const import CONF_HOST, CONF_PORT
@@ -15,6 +17,7 @@ from custom_components.escpos_printer.const import (
 
 
 async def test_options_flow_update(hass):  # type: ignore[no-untyped-def]
+
     entry = MockConfigEntry(
         domain=DOMAIN,
         title="1.2.3.4:9100",

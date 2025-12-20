@@ -480,15 +480,21 @@ class HATestEnvironment:
         # Wait for all futures with timeout
         if futures_to_wait:
             try:
-                # Use concurrent.futures.wait with timeout
-                done, pending = concurrent.futures.wait(
-                    futures_to_wait,
+                # Convert concurrent.futures.Future to asyncio.Future to avoid blocking the event loop
+                asyncio_futures = {asyncio.wrap_future(f) for f in futures_to_wait}
+                
+                # Use asyncio.wait with timeout (non-blocking)
+                done, pending = await asyncio.wait(
+                    asyncio_futures,
                     timeout=timeout,
-                    return_when=concurrent.futures.ALL_COMPLETED
+                    return_when=asyncio.ALL_COMPLETED
                 )
                 # Log if any didn't complete
                 if pending:
                     _LOGGER.warning("Some mirror operations did not complete in time: %d pending", len(pending))
+                    # Cancel pending futures to prevent resource leaks
+                    for future in pending:
+                        future.cancel()
             except Exception as e:
                 _LOGGER.debug("Error waiting for mirror operations: %s", e)
 
