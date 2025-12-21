@@ -4,20 +4,17 @@
 ![Hassfest](https://github.com/cognitivegears/ha-escpos-thermal-printer/actions/workflows/hassfest.yml/badge.svg)
 ![HACS Validation](https://github.com/cognitivegears/ha-escpos-thermal-printer/actions/workflows/hacs.yml/badge.svg)
 
-A comprehensive Home Assistant integration for ESC/POS thermal printers that enables printing text, QR codes, barcodes, images, and more through intuitive services and automation.
+A Home Assistant integration for ESC/POS thermal printers that enables printing text, QR codes, barcodes, images, and more through automation.
 
 ![Printed Receipt Example](docs/assets/receipt.png)
 
 The above is an example receipt printed using this integration.
 
-*NOTE:* This project has been developed as a side project for me to integrate my own thermal printer into Home Assistant. As such, this has not had extensive testing with mulitple printers, or with features my printer doesn't support (particularly image support is implemented but hasn't been tested) - do not expect this to work in your own environment, though it does in mine. If this is useful to you, please consider contributing or adapting it for your needs.
-
 ## Features
 
-- **UI Configuration Flow** - No YAML required, easy setup through Home Assistant UI
+- **UI Configuration** - No YAML required, easy setup through Home Assistant UI
 - **Multiple Print Services** - Text, QR codes, barcodes, images, paper feed, cutting, and buzzer control
 - **Notify Integration** - Send messages as printed receipts through Home Assistant notifications
-- **Robust Error Handling** - Non-blocking I/O with configurable timeouts and connection management
 - **Network Printer Support** - Works with any ESC/POS compatible thermal printer on your network
 - **Flexible Formatting** - Support for text alignment, bold, underline, font sizes, and custom encoding
 
@@ -28,15 +25,6 @@ The above is an example receipt printed using this integration.
 - **Home Assistant**: 2024.8 or later
 - **Network Printer**: ESC/POS compatible thermal printer reachable on TCP port 9100 (default)
 - **Network Connectivity**: Printer must be accessible from your Home Assistant instance
-
-### Dependencies
-
-This integration automatically installs required Python packages, including:
-
-- python-escpos — Core ESC/POS printing library
-- Pillow — Image processing for printing images
-- qrcode — QR code generation
-- python-barcode — Barcode generation
 
 ## Installation
 
@@ -118,10 +106,6 @@ After initial setup, you can modify additional settings:
 
 ### Network Configuration
 
-Most ESC/POS thermal printers support network connectivity. Here's how to configure common models:
-
-#### Epson TM Series Printers
-
 1. **Connect to Network**:
    - Connect the printer to your network using Ethernet cable
    - Power on the printer and wait for initialization
@@ -130,22 +114,9 @@ Most ESC/POS thermal printers support network connectivity. Here's how to config
    - Print a network configuration receipt (usually by holding the feed button during power-on)
    - Look for the IP address on the printed receipt
 
-3. **Test Connectivity**:
-
-   ```bash
-   # From your Home Assistant host, test connection
-   telnet <PRINTER_IP> 9100
-   ```
-
-#### Other ESC/POS Compatible Printers
-
-- **Star Micronics**: Follow similar Ethernet setup procedures
-- **Citizen Printers**: Use the printer's web interface or configuration utility
-- **Generic ESC/POS**: Ensure the printer supports raw TCP printing on port 9100
-
 ### Supported Printers
 
-This integration works with any printer supported by the [python-escpos library](https://python-escpos.readthedocs.io/en/latest/). Popular supported models include:
+This integration should work with any printer supported by the [python-escpos library](https://python-escpos.readthedocs.io/en/latest/). Popular supported models include:
 
 - **Epson**: TM-20, TM-88, TM-T20, TM-T70, TM-T88, TM-U220, TM-U295
 - **Star Micronics**: TSP100, TSP650, TSP700, TSP800, SP500, SP700
@@ -627,7 +598,3 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **Issues**: [GitHub Issues](https://github.com/cognitivegears/ha-escpos-thermal-printer/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/cognitivegears/ha-escpos-thermal-printer/discussions)
 - **Documentation**: [GitHub Wiki](https://github.com/cognitivegears/ha-escpos-thermal-printer/wiki)
-
----
-
-**Note**: This integration is not officially affiliated with Home Assistant or any printer manufacturers. Use at your own risk.
