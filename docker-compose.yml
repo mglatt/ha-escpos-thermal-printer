@@ -1,0 +1,17 @@
+# Docker Compose for local Home Assistant testing
+# Usage: docker compose up
+# Access HA at http://localhost:8123
+
+services:
+  homeassistant:
+    container_name: ha-test
+    image: ghcr.io/home-assistant/home-assistant:stable
+    volumes:
+      - ./custom_components:/config/custom_components:ro
+      - ha_config:/config
+    ports:
+      - "8123:8123"
+    restart: unless-stopped
+
+volumes:
+  ha_config:

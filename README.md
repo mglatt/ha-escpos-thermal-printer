@@ -613,6 +613,25 @@ Run the test suite:
 python -m pytest tests/
 ```
 
+### Local Testing with Docker
+
+Run a local Home Assistant instance with the integration mounted:
+
+```bash
+# Start Home Assistant (access at http://localhost:8123)
+docker compose up
+
+# Run in background
+docker compose up -d
+
+# Stop and remove container
+docker compose down
+```
+
+The Docker Compose setup mounts `custom_components/` into the container, so changes to your code are reflected on HA restart.
+
+Once the container is running, open http://localhost:8123 in your browser. Complete the Home Assistant onboarding, then go to **Settings** → **Devices & services** → **Add Integration** and search for "ESC/POS Thermal Printer" to test the integration directly.
+
 ### Developer Utilities
 
 - Framework smoke test (no Home Assistant required):
