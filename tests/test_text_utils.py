@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from custom_components.escpos_printer.text_utils import (
     ACCENT_FALLBACK_MAP,
     LOOKALIKE_MAP,
@@ -96,9 +94,16 @@ class TestApplyLookalikeMap:
         assert apply_lookalike_map("\u21d2") == "=>"
 
     def test_fractions(self) -> None:
-        """Fraction characters should be converted."""
-        assert apply_lookalike_map("\u00bc") == "1/4"
-        assert apply_lookalike_map("\u00bd") == "1/2"
+        """Fraction characters should be converted.
+
+        Note: ¼ and ½ are in ACCENT_FALLBACK_MAP (not LOOKALIKE_MAP) because they
+        exist in common codepages like CP437. Only ¾ is in LOOKALIKE_MAP since
+        it's not in CP437.
+        """
+        # ¼ and ½ are in CP437, so they're in ACCENT_FALLBACK_MAP, not LOOKALIKE_MAP
+        assert apply_lookalike_map("\u00bc") == "\u00bc"  # Preserved (in ACCENT_FALLBACK_MAP)
+        assert apply_lookalike_map("\u00bd") == "\u00bd"  # Preserved (in ACCENT_FALLBACK_MAP)
+        # ¾ is NOT in CP437, so it's in LOOKALIKE_MAP
         assert apply_lookalike_map("\u00be") == "3/4"
 
     def test_check_marks(self) -> None:
@@ -225,6 +230,41 @@ class TestTranscodeToCodepage:
         result = transcode_to_codepage(text, "CP437")
         # Should be replaced with ? or similar
         assert result != text
+
+    def test_cp437_native_symbols_preserved(self) -> None:
+        """Symbols native to CP437 should be preserved, not converted to fallbacks.
+
+        Characters like ±, £, ¥, ÷ exist in CP437 and should be kept as-is
+        when transcoding to CP437, not converted to their ASCII fallbacks.
+
+        Note: Fractions ¼, ½ are decomposed by NFKC normalization to "1/4", "1/2"
+        before encoding, so they don't preserve the single-character form.
+        """
+        # These characters are in CP437 and should be preserved
+        text = "±£¥÷"
+        result = transcode_to_codepage(text, "CP437")
+        # All should be preserved since they're native to CP437
+        assert "±" in result
+        assert "£" in result
+        assert "¥" in result
+        assert "÷" in result
+        # Verify they weren't converted to their ASCII fallbacks
+        assert "+/-" not in result
+        assert "GBP" not in result
+        assert "JPY" not in result
+
+    def test_symbols_fallback_for_unsupported_codepage(self) -> None:
+        """Symbols not in target codepage should use fallback representations.
+
+        When transcoding to a codepage that doesn't support these symbols,
+        they should be converted to their ASCII equivalents.
+        """
+        # ASCII doesn't support these symbols, so they should be converted
+        text = "±£"
+        result = transcode_to_codepage(text, "ASCII")
+        # Should use fallbacks: ± -> "+/-", £ -> "GBP"
+        assert "+/-" in result
+        assert "GBP" in result
 
     def test_full_pipeline(self) -> None:
         """Full transcoding pipeline should work."""

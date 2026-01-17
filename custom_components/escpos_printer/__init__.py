@@ -11,6 +11,7 @@ from homeassistant.exceptions import HomeAssistantError
 import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
 
+from .capabilities import PROFILE_AUTO, is_valid_profile
 from .const import (
     ATTR_ALIGN,
     ATTR_ALIGN_CT,
@@ -47,6 +48,9 @@ from .const import (
     CONF_PROFILE,
     CONF_STATUS_INTERVAL,
     CONF_TIMEOUT,
+    DEFAULT_ALIGN,
+    DEFAULT_CUT,
+    DEFAULT_LINE_WIDTH,
     DOMAIN,
     SERVICE_BEEP,
     SERVICE_CUT,
@@ -67,31 +71,47 @@ PLATFORMS: list[str] = ["notify", "binary_sensor"]
 
 
 async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
-    """Migrate old entry to new format."""
-    _LOGGER.debug(
-        "Migrating from version %s.%s", config_entry.version, config_entry.minor_version
-    )
+    """Migrate old config entries to new format.
 
+    Args:
+        hass: Home Assistant instance
+        config_entry: Config entry to migrate
+
+    Returns:
+        True if migration successful
+    """
     if config_entry.version == 1:
-        # Version 1 -> 2 migration
-        # In v1, all options were in data. In v2, profile is in data, encoding options in options.
-        # For backward compatibility, we keep the same data structure.
+        _LOGGER.info(
+            "Migrating config entry %s from version 1 to 2", config_entry.entry_id
+        )
+
         new_data = dict(config_entry.data)
 
-        # Ensure default values are set
-        if CONF_CODEPAGE not in new_data:
-            new_data[CONF_CODEPAGE] = "CP437"
-        if CONF_DEFAULT_ALIGN not in new_data:
-            new_data[CONF_DEFAULT_ALIGN] = "left"
-        if CONF_DEFAULT_CUT not in new_data:
-            new_data[CONF_DEFAULT_CUT] = "none"
+        # Profile: validate it exists
+        old_profile = new_data.get(CONF_PROFILE, "")
+        if old_profile and not is_valid_profile(old_profile):
+            _LOGGER.warning(
+                "Profile '%s' not found in database; keeping for compatibility",
+                old_profile,
+            )
+
+        # Ensure all expected fields exist with defaults
+        # Empty string for codepage means "auto-detect"
+        new_data.setdefault(CONF_PROFILE, PROFILE_AUTO)
+        new_data.setdefault(CONF_CODEPAGE, "")
+        new_data.setdefault(CONF_LINE_WIDTH, DEFAULT_LINE_WIDTH)
+        new_data.setdefault(CONF_DEFAULT_ALIGN, DEFAULT_ALIGN)
+        new_data.setdefault(CONF_DEFAULT_CUT, DEFAULT_CUT)
 
         hass.config_entries.async_update_entry(
-            config_entry, data=new_data, version=2, minor_version=0
+            config_entry,
+            data=new_data,
+            version=2,
+            minor_version=0,
         )
-        _LOGGER.info(
-            "Migration to version %s.%s successful", config_entry.version, config_entry.minor_version
-        )
+
+        _LOGGER.info("Migration complete for entry %s", config_entry.entry_id)
+        return True
 
     return True
 

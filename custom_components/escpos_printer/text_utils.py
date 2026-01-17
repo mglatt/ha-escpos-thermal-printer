@@ -3,6 +3,23 @@
 This module provides functions to transcode UTF-8 text to legacy codepages
 used by ESC/POS thermal printers, with support for look-alike character
 substitution when direct mapping is not available.
+
+Character Mapping Strategy:
+---------------------------
+The transcoding process uses two fallback maps, applied in order ONLY when
+direct encoding to the target codepage fails:
+
+1. LOOKALIKE_MAP: ASCII fallbacks for characters that may or may not exist in
+   the target codepage. Includes:
+   - Universal lookalikes (curly quotes -> straight quotes, em dash -> --)
+   - Box drawing/block elements (exist in CP437, fallback to ASCII for others)
+
+2. ACCENT_FALLBACK_MAP: Fallbacks for accented characters and symbols that
+   exist in some codepages but not others. Only used when direct encoding fails.
+
+IMPORTANT: The transcode_to_codepage() function always tries direct encoding
+first. Characters native to the target codepage (e.g., box drawing in CP437)
+are preserved, not replaced with their ASCII fallbacks.
 """
 
 from __future__ import annotations
@@ -12,9 +29,18 @@ import unicodedata
 
 _LOGGER = logging.getLogger(__name__)
 
-# Look-alike character mapping for common Unicode characters
-# Maps Unicode characters to their ASCII/basic Latin equivalents
+# Fallback character mapping for Unicode characters not in the target codepage.
+# Maps Unicode characters to ASCII/basic Latin equivalents.
+#
+# NOTE: This map is ONLY consulted when direct encoding to the target codepage
+# fails. Characters that exist in the target codepage (e.g., box drawing in
+# CP437) are preserved as-is, not replaced with these fallbacks.
 LOOKALIKE_MAP: dict[str, str] = {
+    # ==========================================================================
+    # UNIVERSAL LOOKALIKES
+    # These characters don't exist in most legacy codepages and should always
+    # be converted to their ASCII equivalents.
+    # ==========================================================================
     # Typographic quotes -> straight quotes
     "\u2018": "'",  # LEFT SINGLE QUOTATION MARK
     "\u2019": "'",  # RIGHT SINGLE QUOTATION MARK
@@ -82,25 +108,19 @@ LOOKALIKE_MAP: dict[str, str] = {
     "\u21d0": "<=",  # LEFTWARDS DOUBLE ARROW
     "\u21d2": "=>",  # RIGHTWARDS DOUBLE ARROW
     "\u21d4": "<=>",  # LEFT RIGHT DOUBLE ARROW
-    # Math symbols
-    "\u00d7": "x",  # MULTIPLICATION SIGN
-    "\u00f7": "/",  # DIVISION SIGN
+    # Math symbols (only those NOT in common codepages like CP437)
+    "\u00d7": "x",  # MULTIPLICATION SIGN (not in CP437)
     "\u2260": "!=",  # NOT EQUAL TO
     "\u2264": "<=",  # LESS-THAN OR EQUAL TO
     "\u2265": ">=",  # GREATER-THAN OR EQUAL TO
-    "\u00b1": "+/-",  # PLUS-MINUS SIGN
     "\u2248": "~=",  # ALMOST EQUAL TO
     "\u221e": "inf",  # INFINITY
     "\u2030": "o/oo",  # PER MILLE SIGN
-    "\u00bc": "1/4",  # VULGAR FRACTION ONE QUARTER
-    "\u00bd": "1/2",  # VULGAR FRACTION ONE HALF
-    "\u00be": "3/4",  # VULGAR FRACTION THREE QUARTERS
+    "\u00be": "3/4",  # VULGAR FRACTION THREE QUARTERS (not in CP437)
     "\u2153": "1/3",  # VULGAR FRACTION ONE THIRD
     "\u2154": "2/3",  # VULGAR FRACTION TWO THIRDS
-    # Currency (fallbacks for currencies not in target codepage)
-    "\u20ac": "EUR",  # EURO SIGN
-    "\u00a3": "GBP",  # POUND SIGN (fallback if not in codepage)
-    "\u00a5": "JPY",  # YEN SIGN (fallback if not in codepage)
+    # Currency (only those NOT in common codepages)
+    "\u20ac": "EUR",  # EURO SIGN (not in CP437)
     "\u20a4": "GBP",  # LIRA SIGN
     "\u20b9": "INR",  # INDIAN RUPEE SIGN
     "\u20bd": "RUB",  # RUBLE SIGN
@@ -147,7 +167,14 @@ LOOKALIKE_MAP: dict[str, str] = {
     "\u211e": "Rx",  # PRESCRIPTION TAKE
     "\u2234": "therefore",  # THEREFORE
     "\u2235": "because",  # BECAUSE
-    # Box drawing (simplified to ASCII)
+    # ==========================================================================
+    # CODEPAGE-SPECIFIC FALLBACKS
+    # These characters exist in some codepages (e.g., CP437 has box drawing)
+    # but not others (e.g., ISO-8859-1). When the target codepage supports them,
+    # they're preserved as-is. These ASCII fallbacks are only used when the
+    # target codepage doesn't include the character.
+    # ==========================================================================
+    # Box drawing -> ASCII art (native to CP437, fallback for ISO-8859-x)
     "\u2500": "-",  # BOX DRAWINGS LIGHT HORIZONTAL
     "\u2501": "-",  # BOX DRAWINGS HEAVY HORIZONTAL
     "\u2502": "|",  # BOX DRAWINGS LIGHT VERTICAL
@@ -193,7 +220,7 @@ LOOKALIKE_MAP: dict[str, str] = {
     "\u256a": "+",  # BOX DRAWINGS VERTICAL SINGLE AND HORIZONTAL DOUBLE
     "\u256b": "+",  # BOX DRAWINGS VERTICAL DOUBLE AND HORIZONTAL SINGLE
     "\u256c": "+",  # BOX DRAWINGS DOUBLE VERTICAL AND HORIZONTAL
-    # Block elements
+    # Block elements -> ASCII art (native to CP437, fallback for ISO-8859-x)
     "\u2588": "#",  # FULL BLOCK
     "\u2591": ".",  # LIGHT SHADE
     "\u2592": "+",  # MEDIUM SHADE
@@ -224,9 +251,19 @@ LOOKALIKE_MAP: dict[str, str] = {
     "\u00af": "-",  # MACRON
 }
 
-# Extended mapping for accented characters to base characters
-# Used when the target codepage doesn't support the accented version
+# Extended mapping for accented characters and symbols to fallback representations
+# Used when the target codepage doesn't support the character directly.
+# Note: The transcoding logic checks direct encoding first, so characters that exist
+# in the target codepage (e.g., ± in CP437) will be preserved, not replaced.
 ACCENT_FALLBACK_MAP: dict[str, str] = {
+    # Symbols that exist in some codepages (e.g., CP437) but not others
+    # These are only used as fallbacks when direct encoding fails
+    "\u00b1": "+/-",  # PLUS-MINUS SIGN (in CP437, fallback for others)
+    "\u00f7": "/",  # DIVISION SIGN (in CP437, fallback for others)
+    "\u00bc": "1/4",  # VULGAR FRACTION ONE QUARTER (in CP437, fallback for others)
+    "\u00bd": "1/2",  # VULGAR FRACTION ONE HALF (in CP437, fallback for others)
+    "\u00a3": "GBP",  # POUND SIGN (in CP437, fallback for others)
+    "\u00a5": "JPY",  # YEN SIGN (in CP437, fallback for others)
     # Latin Extended-A and Extended-B characters
     "\u0100": "A",  # LATIN CAPITAL LETTER A WITH MACRON
     "\u0101": "a",  # LATIN SMALL LETTER A WITH MACRON
@@ -706,7 +743,7 @@ def transcode_to_codepage(
             result_chars.append(char)
             continue
         except UnicodeEncodeError:
-            pass
+            pass  # Character not in codepage, try fallback maps below
 
         # Try look-alike substitution
         if apply_lookalikes and char in LOOKALIKE_MAP:

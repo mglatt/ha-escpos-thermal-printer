@@ -7,9 +7,8 @@ import socket
 from typing import Any
 
 from homeassistant import config_entries
-from homeassistant.config_entries import ConfigEntry, ConfigFlowResult
+from homeassistant.config_entries import ConfigFlowResult
 from homeassistant.const import CONF_HOST, CONF_PORT
-from homeassistant.core import HomeAssistant
 import voluptuous as vol
 
 from .capabilities import (
@@ -20,10 +19,10 @@ from .capabilities import (
     get_profile_codepages,
     get_profile_cut_modes,
     get_profile_line_widths,
+    is_valid_codepage_for_profile,
     is_valid_profile,
 )
 from .const import (
-    CODEPAGE_CHOICES,
     CONF_CODEPAGE,
     CONF_DEFAULT_ALIGN,
     CONF_DEFAULT_CUT,
@@ -33,13 +32,11 @@ from .const import (
     CONF_STATUS_INTERVAL,
     CONF_TIMEOUT,
     DEFAULT_ALIGN,
-    DEFAULT_CODEPAGE,
     DEFAULT_CUT,
     DEFAULT_LINE_WIDTH,
     DEFAULT_PORT,
     DEFAULT_TIMEOUT,
     DOMAIN,
-    LINE_WIDTH_CHOICES,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -62,48 +59,6 @@ def _can_connect(host: str, port: int, timeout: float) -> bool:
             return True
     except OSError:
         return False
-
-
-async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
-    """Migrate old config entries to new format.
-
-    Args:
-        hass: Home Assistant instance
-        config_entry: Config entry to migrate
-
-    Returns:
-        True if migration successful
-    """
-    if config_entry.version == 1:
-        _LOGGER.info("Migrating config entry %s from version 1 to 2", config_entry.entry_id)
-
-        new_data = dict(config_entry.data)
-
-        # Profile: validate it exists
-        old_profile = new_data.get(CONF_PROFILE, "")
-        if old_profile and not is_valid_profile(old_profile):
-            _LOGGER.warning(
-                "Profile '%s' not found in database; keeping for compatibility",
-                old_profile,
-            )
-
-        # Ensure all expected fields exist with defaults
-        new_data.setdefault(CONF_PROFILE, PROFILE_AUTO)
-        new_data.setdefault(CONF_CODEPAGE, "")
-        new_data.setdefault(CONF_LINE_WIDTH, DEFAULT_LINE_WIDTH)
-        new_data.setdefault(CONF_DEFAULT_ALIGN, DEFAULT_ALIGN)
-        new_data.setdefault(CONF_DEFAULT_CUT, DEFAULT_CUT)
-
-        hass.config_entries.async_update_entry(
-            config_entry,
-            data=new_data,
-            version=2,
-        )
-
-        _LOGGER.info("Migration complete for entry %s", config_entry.entry_id)
-        return True
-
-    return True
 
 
 class EscposConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -187,11 +142,22 @@ class EscposConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         Returns:
             FlowResult for next step
         """
+        errors: dict[str, str] = {}
+
         if user_input is not None:
             custom_profile = user_input.get("custom_profile", "").strip()
             _LOGGER.debug("Custom profile entered: %s", custom_profile)
-            self._user_data[CONF_PROFILE] = custom_profile
-            return await self.async_step_codepage()
+
+            # Validate the profile exists in escpos-printer-db
+            is_valid = await self.hass.async_add_executor_job(
+                is_valid_profile, custom_profile
+            )
+            if not custom_profile or not is_valid:
+                _LOGGER.warning("Invalid profile name: %s", custom_profile)
+                errors["base"] = "invalid_profile"
+            else:
+                self._user_data[CONF_PROFILE] = custom_profile
+                return await self.async_step_codepage()
 
         data_schema = vol.Schema(
             {
@@ -202,6 +168,7 @@ class EscposConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="custom_profile",
             data_schema=data_schema,
+            errors=errors,
         )
 
     async def async_step_codepage(
@@ -319,26 +286,37 @@ class EscposConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         Returns:
             FlowResult for entry creation or line width step
         """
+        errors: dict[str, str] = {}
+
         if user_input is not None:
             custom_codepage = user_input.get("custom_codepage", "").strip()
             _LOGGER.debug("Custom codepage entered: %s", custom_codepage)
 
-            # Check if we still need custom line width
-            line_width = self._user_data.get(CONF_LINE_WIDTH)
-            if line_width == OPTION_CUSTOM or line_width is None:
-                self._user_data[CONF_CODEPAGE] = custom_codepage
-                return await self.async_step_custom_line_width()
+            # Validate the codepage
+            profile = self._user_data.get(CONF_PROFILE)
+            is_valid = await self.hass.async_add_executor_job(
+                is_valid_codepage_for_profile, custom_codepage, profile
+            )
+            if not custom_codepage or not is_valid:
+                _LOGGER.warning("Invalid codepage: %s", custom_codepage)
+                errors["base"] = "invalid_codepage"
+            else:
+                # Check if we still need custom line width
+                line_width = self._user_data.get(CONF_LINE_WIDTH)
+                if line_width == OPTION_CUSTOM or line_width is None:
+                    self._user_data[CONF_CODEPAGE] = custom_codepage
+                    return await self.async_step_custom_line_width()
 
-            # Create entry
-            data = {
-                **self._user_data,
-                CONF_CODEPAGE: custom_codepage,
-            }
+                # Create entry
+                data = {
+                    **self._user_data,
+                    CONF_CODEPAGE: custom_codepage,
+                }
 
-            host = data[CONF_HOST]
-            port = data[CONF_PORT]
+                host = data[CONF_HOST]
+                port = data[CONF_PORT]
 
-            return self.async_create_entry(title=f"{host}:{port}", data=data)
+                return self.async_create_entry(title=f"{host}:{port}", data=data)
 
         data_schema = vol.Schema(
             {
@@ -349,6 +327,7 @@ class EscposConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="custom_codepage",
             data_schema=data_schema,
+            errors=errors,
         )
 
     async def async_step_custom_line_width(
@@ -362,26 +341,33 @@ class EscposConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         Returns:
             FlowResult for entry creation
         """
+        errors: dict[str, str] = {}
+
         if user_input is not None:
-            custom_width = user_input.get("custom_line_width", DEFAULT_LINE_WIDTH)
+            custom_width = user_input.get("custom_line_width")
             _LOGGER.debug("Custom line width entered: %s", custom_width)
 
+            # Validate line width is a positive number within reasonable bounds
             try:
-                width_int = int(custom_width)
-                width_int = max(1, min(width_int, 255))  # Reasonable bounds
+                width_int = int(custom_width)  # type: ignore[arg-type]
+                if width_int < 1 or width_int > 255:
+                    _LOGGER.warning("Invalid line width (out of range): %s", custom_width)
+                    errors["base"] = "invalid_line_width"
             except (ValueError, TypeError):
-                width_int = DEFAULT_LINE_WIDTH
+                _LOGGER.warning("Invalid line width (not a number): %s", custom_width)
+                errors["base"] = "invalid_line_width"
 
-            # Create entry
-            data = {
-                **self._user_data,
-                CONF_LINE_WIDTH: width_int,
-            }
+            if not errors:
+                # Create entry
+                data = {
+                    **self._user_data,
+                    CONF_LINE_WIDTH: width_int,
+                }
 
-            host = data[CONF_HOST]
-            port = data[CONF_PORT]
+                host = data[CONF_HOST]
+                port = data[CONF_PORT]
 
-            return self.async_create_entry(title=f"{host}:{port}", data=data)
+                return self.async_create_entry(title=f"{host}:{port}", data=data)
 
         data_schema = vol.Schema(
             {
@@ -392,6 +378,7 @@ class EscposConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="custom_line_width",
             data_schema=data_schema,
+            errors=errors,
         )
 
     async def async_step_import(
@@ -614,23 +601,33 @@ class EscposOptionsFlowHandler(config_entries.OptionsFlow):
         Returns:
             FlowResult for next step or entry creation
         """
+        errors: dict[str, str] = {}
+
         if user_input is not None:
             custom_profile = user_input.get("custom_profile", "").strip()
             _LOGGER.debug("Options: Custom profile entered: %s", custom_profile)
 
-            data = dict(self._pending_data)
-            data[CONF_PROFILE] = custom_profile
+            # Validate the profile exists in escpos-printer-db
+            is_valid = await self.hass.async_add_executor_job(
+                is_valid_profile, custom_profile
+            )
+            if not custom_profile or not is_valid:
+                _LOGGER.warning("Invalid profile name: %s", custom_profile)
+                errors["base"] = "invalid_profile"
+            else:
+                data = dict(self._pending_data)
+                data[CONF_PROFILE] = custom_profile
 
-            # Check if codepage or line width also need custom entry
-            if data.get(CONF_CODEPAGE) == OPTION_CUSTOM:
-                self._pending_data = data
-                return await self.async_step_custom_codepage()
+                # Check if codepage or line width also need custom entry
+                if data.get(CONF_CODEPAGE) == OPTION_CUSTOM:
+                    self._pending_data = data
+                    return await self.async_step_custom_codepage()
 
-            if data.get(CONF_LINE_WIDTH) == OPTION_CUSTOM:
-                self._pending_data = data
-                return await self.async_step_custom_line_width()
+                if data.get(CONF_LINE_WIDTH) == OPTION_CUSTOM:
+                    self._pending_data = data
+                    return await self.async_step_custom_line_width()
 
-            return self.async_create_entry(title="Options", data=data)
+                return self.async_create_entry(title="Options", data=data)
 
         data_schema = vol.Schema(
             {
@@ -641,6 +638,7 @@ class EscposOptionsFlowHandler(config_entries.OptionsFlow):
         return self.async_show_form(
             step_id="custom_profile",
             data_schema=data_schema,
+            errors=errors,
         )
 
     async def async_step_custom_codepage(
@@ -654,19 +652,30 @@ class EscposOptionsFlowHandler(config_entries.OptionsFlow):
         Returns:
             FlowResult for next step or entry creation
         """
+        errors: dict[str, str] = {}
+
         if user_input is not None:
             custom_codepage = user_input.get("custom_codepage", "").strip()
             _LOGGER.debug("Options: Custom codepage entered: %s", custom_codepage)
 
-            data = dict(self._pending_data)
-            data[CONF_CODEPAGE] = custom_codepage
+            # Validate the codepage
+            profile = self._pending_data.get(CONF_PROFILE)
+            is_valid = await self.hass.async_add_executor_job(
+                is_valid_codepage_for_profile, custom_codepage, profile
+            )
+            if not custom_codepage or not is_valid:
+                _LOGGER.warning("Invalid codepage: %s", custom_codepage)
+                errors["base"] = "invalid_codepage"
+            else:
+                data = dict(self._pending_data)
+                data[CONF_CODEPAGE] = custom_codepage
 
-            # Check if line width also needs custom entry
-            if data.get(CONF_LINE_WIDTH) == OPTION_CUSTOM:
-                self._pending_data = data
-                return await self.async_step_custom_line_width()
+                # Check if line width also needs custom entry
+                if data.get(CONF_LINE_WIDTH) == OPTION_CUSTOM:
+                    self._pending_data = data
+                    return await self.async_step_custom_line_width()
 
-            return self.async_create_entry(title="Options", data=data)
+                return self.async_create_entry(title="Options", data=data)
 
         data_schema = vol.Schema(
             {
@@ -677,6 +686,7 @@ class EscposOptionsFlowHandler(config_entries.OptionsFlow):
         return self.async_show_form(
             step_id="custom_codepage",
             data_schema=data_schema,
+            errors=errors,
         )
 
     async def async_step_custom_line_width(
@@ -690,20 +700,27 @@ class EscposOptionsFlowHandler(config_entries.OptionsFlow):
         Returns:
             FlowResult for entry creation
         """
+        errors: dict[str, str] = {}
+
         if user_input is not None:
-            custom_width = user_input.get("custom_line_width", DEFAULT_LINE_WIDTH)
+            custom_width = user_input.get("custom_line_width")
             _LOGGER.debug("Options: Custom line width entered: %s", custom_width)
 
+            # Validate line width is a positive number within reasonable bounds
             try:
-                width_int = int(custom_width)
-                width_int = max(1, min(width_int, 255))  # Reasonable bounds
+                width_int = int(custom_width)  # type: ignore[arg-type]
+                if width_int < 1 or width_int > 255:
+                    _LOGGER.warning("Invalid line width (out of range): %s", custom_width)
+                    errors["base"] = "invalid_line_width"
             except (ValueError, TypeError):
-                width_int = DEFAULT_LINE_WIDTH
+                _LOGGER.warning("Invalid line width (not a number): %s", custom_width)
+                errors["base"] = "invalid_line_width"
 
-            data = dict(self._pending_data)
-            data[CONF_LINE_WIDTH] = width_int
+            if not errors:
+                data = dict(self._pending_data)
+                data[CONF_LINE_WIDTH] = width_int
 
-            return self.async_create_entry(title="Options", data=data)
+                return self.async_create_entry(title="Options", data=data)
 
         data_schema = vol.Schema(
             {
@@ -714,4 +731,5 @@ class EscposOptionsFlowHandler(config_entries.OptionsFlow):
         return self.async_show_form(
             step_id="custom_line_width",
             data_schema=data_schema,
+            errors=errors,
         )
