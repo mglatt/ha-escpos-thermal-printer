@@ -11,6 +11,7 @@ from homeassistant.exceptions import HomeAssistantError
 import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
 
+from .capabilities import PROFILE_AUTO, is_valid_profile
 from .const import (
     ATTR_ALIGN,
     ATTR_ALIGN_CT,
@@ -47,6 +48,9 @@ from .const import (
     CONF_PROFILE,
     CONF_STATUS_INTERVAL,
     CONF_TIMEOUT,
+    DEFAULT_ALIGN,
+    DEFAULT_CUT,
+    DEFAULT_LINE_WIDTH,
     DOMAIN,
     SERVICE_BEEP,
     SERVICE_CUT,
@@ -55,13 +59,61 @@ from .const import (
     SERVICE_PRINT_IMAGE,
     SERVICE_PRINT_QR,
     SERVICE_PRINT_TEXT,
+    SERVICE_PRINT_TEXT_UTF8,
 )
 from .printer import EscposPrinterAdapter, PrinterConfig
+from .text_utils import transcode_to_codepage
 
 _LOGGER = logging.getLogger(__name__)
 
 
 PLATFORMS: list[str] = ["notify", "binary_sensor"]
+
+
+async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
+    """Migrate old config entries to new format.
+
+    Args:
+        hass: Home Assistant instance
+        config_entry: Config entry to migrate
+
+    Returns:
+        True if migration successful
+    """
+    if config_entry.version == 1:
+        _LOGGER.info(
+            "Migrating config entry %s from version 1 to 2", config_entry.entry_id
+        )
+
+        new_data = dict(config_entry.data)
+
+        # Profile: validate it exists
+        old_profile = new_data.get(CONF_PROFILE, "")
+        if old_profile and not is_valid_profile(old_profile):
+            _LOGGER.warning(
+                "Profile '%s' not found in database; keeping for compatibility",
+                old_profile,
+            )
+
+        # Ensure all expected fields exist with defaults
+        # Empty string for codepage means "auto-detect"
+        new_data.setdefault(CONF_PROFILE, PROFILE_AUTO)
+        new_data.setdefault(CONF_CODEPAGE, "")
+        new_data.setdefault(CONF_LINE_WIDTH, DEFAULT_LINE_WIDTH)
+        new_data.setdefault(CONF_DEFAULT_ALIGN, DEFAULT_ALIGN)
+        new_data.setdefault(CONF_DEFAULT_CUT, DEFAULT_CUT)
+
+        hass.config_entries.async_update_entry(
+            config_entry,
+            data=new_data,
+            version=2,
+            minor_version=0,
+        )
+
+        _LOGGER.info("Migration complete for entry %s", config_entry.entry_id)
+        return True
+
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -109,6 +161,43 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             )
         except Exception as err:
             _LOGGER.exception("Service print_text failed: %s", err)
+            raise HomeAssistantError(str(err)) from err
+
+    async def _handle_print_text_utf8(call: ServiceCall) -> None:
+        _LOGGER.debug("Service call: print_text_utf8 data=%s", dict(call.data))
+        try:
+            defaults = hass.data[DOMAIN][entry.entry_id]["defaults"]
+            text = cv.string(call.data[ATTR_TEXT])
+
+            # Get the configured codepage for transcoding
+            codepage = config.codepage or "CP437"
+
+            # Transcode UTF-8 text to the target codepage with look-alike mapping
+            transcoded_text = await hass.async_add_executor_job(
+                transcode_to_codepage, text, codepage
+            )
+
+            _LOGGER.debug(
+                "Transcoded text from UTF-8 to %s: %d -> %d chars",
+                codepage,
+                len(text),
+                len(transcoded_text),
+            )
+
+            await adapter.print_text(
+                hass,
+                text=transcoded_text,
+                align=call.data.get(ATTR_ALIGN, defaults.get("align")),
+                bold=call.data.get(ATTR_BOLD),
+                underline=call.data.get(ATTR_UNDERLINE),
+                width=call.data.get(ATTR_WIDTH),
+                height=call.data.get(ATTR_HEIGHT),
+                encoding=None,  # Don't override - let printer use configured codepage
+                cut=call.data.get(ATTR_CUT, defaults.get("cut")),
+                feed=call.data.get(ATTR_FEED),
+            )
+        except Exception as err:
+            _LOGGER.exception("Service print_text_utf8 failed: %s", err)
             raise HomeAssistantError(str(err)) from err
 
     async def _handle_print_qr(call: ServiceCall) -> None:
@@ -200,18 +289,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             raise HomeAssistantError(str(err)) from err
 
     # Register services under the integration domain
+    # Note: Registration order may affect display order in the UI
+    hass.services.async_register(DOMAIN, SERVICE_PRINT_TEXT_UTF8, _handle_print_text_utf8)
+    _LOGGER.debug("Registered service %s.%s", DOMAIN, SERVICE_PRINT_TEXT_UTF8)
     hass.services.async_register(DOMAIN, SERVICE_PRINT_TEXT, _handle_print_text)
     _LOGGER.debug("Registered service %s.%s", DOMAIN, SERVICE_PRINT_TEXT)
     hass.services.async_register(DOMAIN, SERVICE_PRINT_QR, _handle_print_qr)
     _LOGGER.debug("Registered service %s.%s", DOMAIN, SERVICE_PRINT_QR)
     hass.services.async_register(DOMAIN, SERVICE_PRINT_IMAGE, _handle_print_image)
     _LOGGER.debug("Registered service %s.%s", DOMAIN, SERVICE_PRINT_IMAGE)
+    hass.services.async_register(DOMAIN, SERVICE_PRINT_BARCODE, _handle_print_barcode)
+    _LOGGER.debug("Registered service %s.%s", DOMAIN, SERVICE_PRINT_BARCODE)
     hass.services.async_register(DOMAIN, SERVICE_FEED, _handle_feed)
     _LOGGER.debug("Registered service %s.%s", DOMAIN, SERVICE_FEED)
     hass.services.async_register(DOMAIN, SERVICE_CUT, _handle_cut)
     _LOGGER.debug("Registered service %s.%s", DOMAIN, SERVICE_CUT)
-    hass.services.async_register(DOMAIN, SERVICE_PRINT_BARCODE, _handle_print_barcode)
-    _LOGGER.debug("Registered service %s.%s", DOMAIN, SERVICE_PRINT_BARCODE)
     hass.services.async_register(DOMAIN, SERVICE_BEEP, _handle_beep)
     _LOGGER.debug("Registered service %s.%s", DOMAIN, SERVICE_BEEP)
 
