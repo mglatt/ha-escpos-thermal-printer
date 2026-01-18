@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import config_validation as cv
-from homeassistant.helpers.service import async_extract_config_entry_ids
+from homeassistant.helpers import device_registry as dr
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
@@ -61,12 +61,11 @@ async def _async_get_target_entries(
 ) -> list[ConfigEntry]:
     """Extract target config entries from a service call.
 
-    Uses Home Assistant's official async_extract_config_entry_ids helper to resolve
-    device/entity/area targets to config entries, then filters to only include
-    entries for this integration.
+    Resolves device_id field from service call data to config entries.
+    The device_id can be a single device ID string or a list of device IDs.
 
     Args:
-        call: Service call with target information
+        call: Service call with device_id in data
 
     Returns:
         List of ConfigEntry objects to target
@@ -76,19 +75,51 @@ async def _async_get_target_entries(
     """
     hass = call.hass
 
-    # Use the official HA helper to extract config entry IDs from targets
-    target_entry_ids = await async_extract_config_entry_ids(call)
+    # Get device_id from service call data
+    device_ids = call.data.get("device_id")
 
-    # Filter to only include entries for our domain
+    # Normalize to a list
+    if device_ids is None:
+        device_id_list: list[str] = []
+    elif isinstance(device_ids, str):
+        device_id_list = [device_ids]
+    else:
+        device_id_list = list(device_ids)
+
+    # If no device_id specified, fall back to all configured printers
+    if not device_id_list:
+        all_entries = list(hass.config_entries.async_loaded_entries(DOMAIN))
+        if not all_entries:
+            raise ServiceValidationError(
+                "No valid ESC/POS printer targets found. Please select a printer device.",
+                translation_domain=DOMAIN,
+                translation_key="no_target_found",
+            )
+        return all_entries
+
+    # Resolve device IDs to config entries
+    device_registry = dr.async_get(hass)
+    target_entry_ids: set[str] = set()
+
+    for device_id in device_id_list:
+        device = device_registry.async_get(device_id)
+        if device is None:
+            _LOGGER.warning("Device %s not found in registry", device_id)
+            continue
+
+        # Get config entry IDs from the device
+        for config_entry_id in device.config_entries:
+            # Check if this config entry is for our domain
+            entry = hass.config_entries.async_get_entry(config_entry_id)
+            if entry and entry.domain == DOMAIN:
+                target_entry_ids.add(config_entry_id)
+
+    # Get the actual config entry objects
     target_entries: list[ConfigEntry] = [
         loaded_entry
         for loaded_entry in hass.config_entries.async_loaded_entries(DOMAIN)
         if loaded_entry.entry_id in target_entry_ids
     ]
-
-    # If no targets specified (empty target_entry_ids), fall back to all configured printers
-    if not target_entry_ids:
-        target_entries = list(hass.config_entries.async_loaded_entries(DOMAIN))
 
     if not target_entries:
         raise ServiceValidationError(
