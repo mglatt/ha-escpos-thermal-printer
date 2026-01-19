@@ -35,14 +35,14 @@ def _get_capabilities() -> dict[str, Any]:
     """
     try:
         from escpos.capabilities import CAPABILITIES  # noqa: PLC0415
+
+        return CAPABILITIES  # type: ignore[no-any-return]  # noqa: TRY300
     except ImportError:
         _LOGGER.warning("python-escpos capabilities not available, using fallback")
         return _get_fallback_capabilities()
     except Exception as e:
         _LOGGER.warning("Failed to load escpos capabilities: %s", e)
         return _get_fallback_capabilities()
-    else:
-        return CAPABILITIES  # type: ignore[no-any-return]
 
 
 def _get_fallback_capabilities() -> dict[str, Any]:

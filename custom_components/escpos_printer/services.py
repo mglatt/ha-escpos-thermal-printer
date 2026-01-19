@@ -157,7 +157,7 @@ def _get_adapter_and_defaults(
         raise HomeAssistantError(f"Printer adapter not found for entry {entry_id}")
 
     defaults = entry_data.get("defaults", {})
-    return adapter, defaults, adapter._config
+    return adapter, defaults, adapter.config
 
 
 async def async_setup_services(hass: HomeAssistant) -> None:  # noqa: PLR0915

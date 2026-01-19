@@ -68,6 +68,11 @@ class EscposPrinterAdapter:
         self._last_latency_ms: int | None = None
         self._last_error_reason: str | None = None
 
+    @property
+    def config(self) -> PrinterConfig:
+        """Return the printer configuration."""
+        return self._config
+
     # Utilities
     def _connect(self) -> Any:
         network_class = _get_network_printer()
