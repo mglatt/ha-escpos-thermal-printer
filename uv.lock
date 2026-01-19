@@ -1253,7 +1253,6 @@ version = "0.3.1"
 source = { editable = "." }
 dependencies = [
     { name = "pillow" },
-    { name = "pycares" },
     { name = "python-barcode" },
     { name = "python-escpos" },
     { name = "qrcode" },
@@ -1339,7 +1338,6 @@ requires-dist = [
     { name = "pip-audit", marker = "extra == 'dev'", specifier = "==2.10.0" },
     { name = "pip-audit", marker = "extra == 'security'", specifier = "==2.10.0" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = "==4.5.1" },
-    { name = "pycares", specifier = "==4.11.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = "==9.0.0" },
     { name = "pytest-homeassistant-custom-component", marker = "extra == 'dev'", specifier = "==0.13.307" },
     { name = "python-barcode", specifier = "==0.16.1" },
