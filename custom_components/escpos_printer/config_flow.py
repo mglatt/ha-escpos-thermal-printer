@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import logging
-import socket
 from typing import Any
 
 from homeassistant import config_entries
 from homeassistant.config_entries import ConfigFlowResult
-from homeassistant.const import CONF_HOST, CONF_PORT
 import voluptuous as vol
 
 from .capabilities import (
@@ -28,37 +26,19 @@ from .const import (
     CONF_DEFAULT_CUT,
     CONF_KEEPALIVE,
     CONF_LINE_WIDTH,
+    CONF_PRINTER_NAME,
     CONF_PROFILE,
     CONF_STATUS_INTERVAL,
     CONF_TIMEOUT,
     DEFAULT_ALIGN,
     DEFAULT_CUT,
     DEFAULT_LINE_WIDTH,
-    DEFAULT_PORT,
     DEFAULT_TIMEOUT,
     DOMAIN,
 )
+from .printer import get_cups_printers, is_cups_printer_available
 
 _LOGGER = logging.getLogger(__name__)
-
-
-def _can_connect(host: str, port: int, timeout: float) -> bool:
-    """Test TCP connectivity to a host and port.
-
-    Args:
-        host: Hostname or IP address to connect to
-        port: Port number to connect to
-        timeout: Connection timeout in seconds
-
-    Returns:
-        True if connection succeeds, False otherwise
-    """
-    try:
-        # Using a raw socket here to validate TCP reachability
-        with socket.create_connection((host, port), timeout=timeout):
-            return True
-    except OSError:
-        return False
 
 
 class EscposConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -73,7 +53,7 @@ class EscposConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Handle step 1: Connection details and profile selection.
+        """Handle step 1: CUPS printer selection and profile selection.
 
         Args:
             user_input: User provided configuration data
@@ -82,27 +62,29 @@ class EscposConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             FlowResult containing the next step or final result
         """
         errors: dict[str, str] = {}
+
+        # Get available CUPS printers
+        available_printers = await self.hass.async_add_executor_job(get_cups_printers)
+
         if user_input is not None:
             _LOGGER.debug("Config flow user step input: %s", user_input)
-            host = user_input[CONF_HOST]
-            port = user_input.get(CONF_PORT, DEFAULT_PORT)
+            printer_name = user_input[CONF_PRINTER_NAME]
             timeout = float(user_input.get(CONF_TIMEOUT, DEFAULT_TIMEOUT))
 
-            await self.async_set_unique_id(f"{host}:{port}")
+            await self.async_set_unique_id(f"cups_{printer_name}")
             self._abort_if_unique_id_configured()
 
             _LOGGER.debug(
-                "Attempting connection test to %s:%s (timeout=%s)", host, port, timeout
+                "Checking CUPS printer availability: %s", printer_name
             )
-            ok = await self.hass.async_add_executor_job(_can_connect, host, port, timeout)
+            ok = await self.hass.async_add_executor_job(is_cups_printer_available, printer_name)
             if ok:
-                _LOGGER.debug("Connection test succeeded for %s:%s", host, port)
+                _LOGGER.debug("CUPS printer '%s' is available", printer_name)
 
                 # Store data and determine next step
                 profile = user_input.get(CONF_PROFILE, PROFILE_AUTO)
                 self._user_data = {
-                    CONF_HOST: host,
-                    CONF_PORT: port,
+                    CONF_PRINTER_NAME: printer_name,
                     CONF_TIMEOUT: timeout,
                     CONF_PROFILE: profile,
                 }
@@ -114,16 +96,21 @@ class EscposConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 # Otherwise go to codepage step
                 return await self.async_step_codepage()
 
-            _LOGGER.warning("Connection test failed for %s:%s", host, port)
+            _LOGGER.warning("CUPS printer '%s' not available", printer_name)
             errors["base"] = "cannot_connect"
 
         # Build profile choices dynamically
         profile_choices = await self.hass.async_add_executor_job(get_profile_choices_dict)
 
+        # Build printer choices from available CUPS printers
+        if available_printers:
+            printer_choices = {p: p for p in available_printers}
+        else:
+            printer_choices = {}
+
         data_schema = vol.Schema(
             {
-                vol.Required(CONF_HOST): str,
-                vol.Optional(CONF_PORT, default=DEFAULT_PORT): int,
+                vol.Required(CONF_PRINTER_NAME): vol.In(printer_choices) if printer_choices else str,
                 vol.Optional(CONF_TIMEOUT, default=DEFAULT_TIMEOUT): vol.Coerce(float),
                 vol.Optional(CONF_PROFILE, default=PROFILE_AUTO): vol.In(profile_choices),
             }
@@ -223,18 +210,16 @@ class EscposConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_DEFAULT_CUT: user_input.get(CONF_DEFAULT_CUT, DEFAULT_CUT),
             }
 
-            host = data[CONF_HOST]
-            port = data[CONF_PORT]
+            printer_name = data[CONF_PRINTER_NAME]
 
             _LOGGER.debug(
-                "Creating config entry for %s:%s with profile=%s codepage=%s",
-                host,
-                port,
+                "Creating config entry for CUPS printer '%s' with profile=%s codepage=%s",
+                printer_name,
                 data.get(CONF_PROFILE),
                 data.get(CONF_CODEPAGE),
             )
 
-            return self.async_create_entry(title=f"{host}:{port}", data=data)
+            return self.async_create_entry(title=printer_name, data=data)
 
         # Get profile-specific options
         profile = self._user_data.get(CONF_PROFILE, PROFILE_AUTO)
@@ -313,10 +298,9 @@ class EscposConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_CODEPAGE: custom_codepage,
                 }
 
-                host = data[CONF_HOST]
-                port = data[CONF_PORT]
+                printer_name = data[CONF_PRINTER_NAME]
 
-                return self.async_create_entry(title=f"{host}:{port}", data=data)
+                return self.async_create_entry(title=printer_name, data=data)
 
         data_schema = vol.Schema(
             {
@@ -364,10 +348,9 @@ class EscposConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_LINE_WIDTH: width_int,
                 }
 
-                host = data[CONF_HOST]
-                port = data[CONF_PORT]
+                printer_name = data[CONF_PRINTER_NAME]
 
-                return self.async_create_entry(title=f"{host}:{port}", data=data)
+                return self.async_create_entry(title=printer_name, data=data)
 
         data_schema = vol.Schema(
             {

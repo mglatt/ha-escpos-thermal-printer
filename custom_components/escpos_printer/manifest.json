@@ -14,6 +14,7 @@
   ],
   "requirements": [
     "python-escpos==3.1",
+    "pycups==2.0.4",
     "Pillow==12.0.0",
     "qrcode==8.2",
     "python-barcode==0.16.1"

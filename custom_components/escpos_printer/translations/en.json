@@ -3,18 +3,16 @@
   "config": {
     "step": {
       "user": {
-        "title": "Configure printer connection",
-        "description": "Enter the connection details for your ESC/POS network printer.",
+        "title": "Configure CUPS printer",
+        "description": "Select your ESC/POS printer from the available CUPS printers.",
         "data": {
-          "host": "Host",
-          "port": "Port",
+          "printer_name": "CUPS Printer",
           "timeout": "Timeout (seconds)",
           "profile": "Printer profile"
         },
         "data_description": {
-          "host": "IP address or hostname of the printer.",
-          "port": "Network port (usually 9100).",
-          "timeout": "Connection timeout in seconds.",
+          "printer_name": "Select the CUPS printer to use.",
+          "timeout": "Operation timeout in seconds.",
           "profile": "Select your printer model or Auto-detect. Choose 'Custom' to enter a profile name manually."
         }
       },
@@ -66,7 +64,7 @@
       }
     },
     "error": {
-      "cannot_connect": "Failed to connect to printer.",
+      "cannot_connect": "CUPS printer not available.",
       "already_configured": "This printer is already configured.",
       "invalid_profile": "Invalid printer profile name.",
       "invalid_codepage": "Invalid codepage/encoding.",
@@ -89,13 +87,13 @@
           "status_interval": "Status check interval (seconds)"
         },
         "data_description": {
-          "timeout": "Connection timeout in seconds.",
+          "timeout": "Operation timeout in seconds.",
           "profile": "Select your printer model. Changing this will reset encoding options.",
           "codepage": "Character encoding/codepage for text.",
           "line_width": "Number of characters per line (columns).",
           "default_align": "Default text alignment for printing.",
           "default_cut": "Default paper cut mode after printing.",
-          "keepalive": "Keep the connection open between print jobs.",
+          "keepalive": "Keep the CUPS connection open between print jobs.",
           "status_interval": "How often to check printer status (0 to disable)."
         }
       },

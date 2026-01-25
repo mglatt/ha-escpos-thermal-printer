@@ -14,14 +14,14 @@ def auto_enable_custom_integrations(enable_custom_integrations: Any) -> None:
 
 @pytest.fixture(autouse=True)
 def fake_escpos_module(request: Any) -> Generator[None, None, None]:
-    # Do not stub escpos for integration tests; use real network path
+    # Do not stub escpos for integration tests; use real CUPS path
     if request.node.get_closest_marker("integration"):
         yield
         return
     escpos = types.ModuleType("escpos")
     printer = types.ModuleType("escpos.printer")
 
-    class _FakeNetwork:
+    class _FakeCupsPrinter:
         def __init__(self, *_, **__):  # type: ignore[no-untyped-def]
             pass
 
@@ -52,11 +52,37 @@ def fake_escpos_module(request: Any) -> Generator[None, None, None]:
         def _raw(self, *_, **__):  # type: ignore[no-untyped-def]
             pass
 
-    printer.Network = _FakeNetwork  # type: ignore[attr-defined]
+    printer.CupsPrinter = _FakeCupsPrinter  # type: ignore[attr-defined]
     escpos.printer = printer  # type: ignore[attr-defined]
 
     sys.modules.setdefault("escpos", escpos)
     sys.modules.setdefault("escpos.printer", printer)
+    yield
+
+
+@pytest.fixture(autouse=True)
+def fake_cups_module(request: Any) -> Generator[None, None, None]:
+    """Provide a fake cups module for unit tests."""
+    if request.node.get_closest_marker("integration"):
+        yield
+        return
+
+    cups = types.ModuleType("cups")
+
+    class _FakeConnection:
+        def __init__(self, *_, **__):  # type: ignore[no-untyped-def]
+            pass
+
+        def getPrinters(self) -> dict[str, dict[str, Any]]:
+            return {
+                "TestPrinter": {
+                    "printer-state": 3,  # idle
+                    "printer-state-reasons": ["none"],
+                }
+            }
+
+    cups.Connection = _FakeConnection  # type: ignore[attr-defined]
+    sys.modules.setdefault("cups", cups)
     yield
 
 
