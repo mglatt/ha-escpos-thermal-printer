@@ -39,56 +39,105 @@ def _get_cups_printer() -> type[Any]:
     return CupsPrinter  # type: ignore[no-any-return]
 
 
-def get_cups_printers() -> list[str]:
+def _get_cups_connection(server: str | None = None) -> Any:
+    """Get a CUPS connection, optionally to a remote server.
+
+    Args:
+        server: CUPS server address (e.g., 'hostname' or 'hostname:port').
+                If None, connects to localhost.
+
+    Returns:
+        cups.Connection object.
+    """
+    import cups  # noqa: PLC0415
+
+    if server:
+        cups.setServer(server)
+    return cups.Connection()
+
+
+def is_cups_available(server: str | None = None) -> bool:
+    """Check if CUPS is available on the system.
+
+    Args:
+        server: CUPS server address. If None, connects to localhost.
+
+    Returns:
+        True if CUPS/pycups is available, False otherwise.
+    """
+    try:
+        import cups  # noqa: PLC0415
+
+        _get_cups_connection(server)
+        return True
+    except ImportError:
+        _LOGGER.warning("pycups library not available - CUPS printing disabled")
+        return False
+    except Exception as e:
+        _LOGGER.warning("CUPS not available: %s", sanitize_log_message(str(e)))
+        return False
+
+
+def get_cups_printers(server: str | None = None) -> list[str]:
     """Get list of available CUPS printers.
+
+    Args:
+        server: CUPS server address. If None, connects to localhost.
 
     Returns:
         List of CUPS printer names.
     """
     try:
-        import cups  # noqa: PLC0415
-
-        conn = cups.Connection()
+        conn = _get_cups_connection(server)
         printers = conn.getPrinters()
         return list(printers.keys())
+    except ImportError:
+        _LOGGER.warning("pycups library not available")
+        return []
     except Exception as e:
         _LOGGER.warning("Failed to get CUPS printers: %s", sanitize_log_message(str(e)))
         return []
 
 
-def is_cups_printer_available(printer_name: str) -> bool:
+def is_cups_printer_available(printer_name: str, server: str | None = None) -> bool:
     """Check if a CUPS printer exists.
 
     Args:
         printer_name: Name of the CUPS printer to check.
+        server: CUPS server address. If None, connects to localhost.
 
     Returns:
         True if printer exists, False otherwise.
     """
     try:
-        import cups  # noqa: PLC0415
-
-        conn = cups.Connection()
+        conn = _get_cups_connection(server)
         printers = conn.getPrinters()
         return printer_name in printers
+    except ImportError:
+        _LOGGER.warning("pycups library not available")
+        return False
     except Exception as e:
         _LOGGER.warning("Failed to check CUPS printer: %s", sanitize_log_message(str(e)))
         return False
 
 
-def get_cups_printer_status(printer_name: str) -> tuple[bool, str | None]:
+def get_cups_printer_status(printer_name: str, server: str | None = None) -> tuple[bool, str | None]:
     """Get status of a CUPS printer.
 
     Args:
         printer_name: Name of the CUPS printer.
+        server: CUPS server address. If None, connects to localhost.
 
     Returns:
         Tuple of (is_available, error_message).
     """
     try:
         import cups  # noqa: PLC0415
+    except ImportError:
+        return False, "pycups library not available"
 
-        conn = cups.Connection()
+    try:
+        conn = _get_cups_connection(server)
         printers = conn.getPrinters()
         if printer_name not in printers:
             return False, "Printer not found"
@@ -116,6 +165,7 @@ def get_cups_printer_status(printer_name: str) -> tuple[bool, str | None]:
 @dataclass
 class PrinterConfig:
     printer_name: str
+    cups_server: str | None = None
     timeout: float = 4.0
     codepage: str | None = None
     profile: str | None = None
@@ -147,6 +197,12 @@ class EscposPrinterAdapter:
 
     # Utilities
     def _connect(self) -> Any:
+        import cups  # noqa: PLC0415
+
+        # Set the CUPS server if configured
+        if self._config.cups_server:
+            cups.setServer(self._config.cups_server)
+
         cups_class = _get_cups_printer()
         profile_obj = None
         if self._config.profile:
@@ -200,7 +256,7 @@ class EscposPrinterAdapter:
         # CUPS printer status check
         def _probe() -> tuple[bool, str | None, int | None]:
             start = time.perf_counter()
-            ok, err = get_cups_printer_status(self._config.printer_name)
+            ok, err = get_cups_printer_status(self._config.printer_name, self._config.cups_server)
             latency_ms = int((time.perf_counter() - start) * 1000)
             return ok, err, latency_ms
 

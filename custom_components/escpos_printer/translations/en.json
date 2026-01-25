@@ -3,7 +3,17 @@
   "config": {
     "step": {
       "user": {
-        "title": "Configure CUPS printer",
+        "title": "Configure CUPS server",
+        "description": "Enter the CUPS server address. Leave empty for localhost.",
+        "data": {
+          "cups_server": "CUPS Server"
+        },
+        "data_description": {
+          "cups_server": "CUPS server address (e.g., 'printserver.local' or '192.168.1.100'). Leave empty to use localhost."
+        }
+      },
+      "printer": {
+        "title": "Select printer",
         "description": "Select your ESC/POS printer from the available CUPS printers.",
         "data": {
           "printer_name": "CUPS Printer",
@@ -65,6 +75,7 @@
     },
     "error": {
       "cannot_connect": "CUPS printer not available.",
+      "cups_unavailable": "CUPS server not available. Please check the server address and ensure CUPS is running.",
       "already_configured": "This printer is already configured.",
       "invalid_profile": "Invalid printer profile name.",
       "invalid_codepage": "Invalid codepage/encoding.",

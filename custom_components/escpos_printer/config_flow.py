@@ -22,6 +22,7 @@ from .capabilities import (
 )
 from .const import (
     CONF_CODEPAGE,
+    CONF_CUPS_SERVER,
     CONF_DEFAULT_ALIGN,
     CONF_DEFAULT_CUT,
     CONF_KEEPALIVE,
@@ -36,7 +37,7 @@ from .const import (
     DEFAULT_TIMEOUT,
     DOMAIN,
 )
-from .printer import get_cups_printers, is_cups_printer_available
+from .printer import get_cups_printers, is_cups_available, is_cups_printer_available
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -49,11 +50,12 @@ class EscposConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     def __init__(self) -> None:
         """Initialize config flow."""
         self._user_data: dict[str, Any] = {}
+        self._cups_server: str | None = None
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Handle step 1: CUPS printer selection and profile selection.
+        """Handle step 1: CUPS server configuration.
 
         Args:
             user_input: User provided configuration data
@@ -63,27 +65,65 @@ class EscposConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """
         errors: dict[str, str] = {}
 
-        # Get available CUPS printers
-        available_printers = await self.hass.async_add_executor_job(get_cups_printers)
-
         if user_input is not None:
             _LOGGER.debug("Config flow user step input: %s", user_input)
+            cups_server = user_input.get(CONF_CUPS_SERVER, "").strip() or None
+            self._cups_server = cups_server
+
+            # Check if CUPS is available at this server
+            cups_available = await self.hass.async_add_executor_job(is_cups_available, cups_server)
+            if cups_available:
+                _LOGGER.debug("CUPS server '%s' is available", cups_server or "localhost")
+                return await self.async_step_printer()
+
+            _LOGGER.warning("CUPS server '%s' not available", cups_server or "localhost")
+            errors["base"] = "cups_unavailable"
+
+        data_schema = vol.Schema(
+            {
+                vol.Optional(CONF_CUPS_SERVER, default=""): str,
+            }
+        )
+
+        return self.async_show_form(step_id="user", data_schema=data_schema, errors=errors)
+
+    async def async_step_printer(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Handle step 2: CUPS printer selection and profile selection.
+
+        Args:
+            user_input: User provided configuration data
+
+        Returns:
+            FlowResult containing the next step or final result
+        """
+        errors: dict[str, str] = {}
+
+        # Get available CUPS printers from the configured server
+        available_printers = await self.hass.async_add_executor_job(get_cups_printers, self._cups_server)
+
+        if user_input is not None:
+            _LOGGER.debug("Config flow printer step input: %s", user_input)
             printer_name = user_input[CONF_PRINTER_NAME]
             timeout = float(user_input.get(CONF_TIMEOUT, DEFAULT_TIMEOUT))
 
-            await self.async_set_unique_id(f"cups_{printer_name}")
+            # Include server in unique_id if specified
+            unique_id = f"cups_{self._cups_server}_{printer_name}" if self._cups_server else f"cups_{printer_name}"
+            await self.async_set_unique_id(unique_id)
             self._abort_if_unique_id_configured()
 
             _LOGGER.debug(
-                "Checking CUPS printer availability: %s", printer_name
+                "Checking CUPS printer availability: %s on server %s", printer_name, self._cups_server or "localhost"
             )
-            ok = await self.hass.async_add_executor_job(is_cups_printer_available, printer_name)
+            ok = await self.hass.async_add_executor_job(is_cups_printer_available, printer_name, self._cups_server)
             if ok:
                 _LOGGER.debug("CUPS printer '%s' is available", printer_name)
 
                 # Store data and determine next step
                 profile = user_input.get(CONF_PROFILE, PROFILE_AUTO)
                 self._user_data = {
+                    CONF_CUPS_SERVER: self._cups_server,
                     CONF_PRINTER_NAME: printer_name,
                     CONF_TIMEOUT: timeout,
                     CONF_PROFILE: profile,
@@ -116,7 +156,7 @@ class EscposConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             }
         )
 
-        return self.async_show_form(step_id="user", data_schema=data_schema, errors=errors)
+        return self.async_show_form(step_id="printer", data_schema=data_schema, errors=errors)
 
     async def async_step_custom_profile(
         self, user_input: dict[str, Any] | None = None

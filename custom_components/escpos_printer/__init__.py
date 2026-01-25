@@ -11,6 +11,7 @@ from homeassistant.helpers import config_validation as cv
 from .capabilities import PROFILE_AUTO, is_valid_profile
 from .const import (
     CONF_CODEPAGE,
+    CONF_CUPS_SERVER,
     CONF_DEFAULT_ALIGN,
     CONF_DEFAULT_CUT,
     CONF_KEEPALIVE,
@@ -108,6 +109,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     config = PrinterConfig(
         printer_name=entry.data[CONF_PRINTER_NAME],
+        cups_server=entry.data.get(CONF_CUPS_SERVER),
         timeout=float(entry.options.get(CONF_TIMEOUT, entry.data.get(CONF_TIMEOUT, 4.0))),
         codepage=entry.options.get(CONF_CODEPAGE) or entry.data.get(CONF_CODEPAGE),
         profile=entry.options.get(CONF_PROFILE) or entry.data.get(CONF_PROFILE),

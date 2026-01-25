@@ -1,6 +1,7 @@
 DOMAIN = "escpos_printer"
 
 # Configuration keys
+CONF_CUPS_SERVER = "cups_server"
 CONF_PRINTER_NAME = "printer_name"
 CONF_TIMEOUT = "timeout"
 CONF_CODEPAGE = "codepage"
