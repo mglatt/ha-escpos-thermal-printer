@@ -6,7 +6,6 @@ import contextlib
 from dataclasses import dataclass
 import io
 import logging
-import socket
 import textwrap
 import time
 from typing import Any
@@ -34,16 +33,89 @@ _LOGGER = logging.getLogger(__name__)
 
 
 # Late import of python-escpos to avoid import errors at HA startup if deps pending
-def _get_network_printer() -> type[Any]:
-    from escpos.printer import Network  # noqa: PLC0415
+def _get_cups_printer() -> type[Any]:
+    from escpos.printer import CupsPrinter  # noqa: PLC0415
 
-    return Network  # type: ignore[no-any-return]
+    return CupsPrinter  # type: ignore[no-any-return]
+
+
+def get_cups_printers() -> list[str]:
+    """Get list of available CUPS printers.
+
+    Returns:
+        List of CUPS printer names.
+    """
+    try:
+        import cups  # noqa: PLC0415
+
+        conn = cups.Connection()
+        printers = conn.getPrinters()
+        return list(printers.keys())
+    except Exception as e:
+        _LOGGER.warning("Failed to get CUPS printers: %s", sanitize_log_message(str(e)))
+        return []
+
+
+def is_cups_printer_available(printer_name: str) -> bool:
+    """Check if a CUPS printer exists.
+
+    Args:
+        printer_name: Name of the CUPS printer to check.
+
+    Returns:
+        True if printer exists, False otherwise.
+    """
+    try:
+        import cups  # noqa: PLC0415
+
+        conn = cups.Connection()
+        printers = conn.getPrinters()
+        return printer_name in printers
+    except Exception as e:
+        _LOGGER.warning("Failed to check CUPS printer: %s", sanitize_log_message(str(e)))
+        return False
+
+
+def get_cups_printer_status(printer_name: str) -> tuple[bool, str | None]:
+    """Get status of a CUPS printer.
+
+    Args:
+        printer_name: Name of the CUPS printer.
+
+    Returns:
+        Tuple of (is_available, error_message).
+    """
+    try:
+        import cups  # noqa: PLC0415
+
+        conn = cups.Connection()
+        printers = conn.getPrinters()
+        if printer_name not in printers:
+            return False, "Printer not found"
+
+        printer_info = printers[printer_name]
+        # CUPS printer states: 3=idle, 4=processing, 5=stopped
+        state = printer_info.get("printer-state", 0)
+        state_reasons = printer_info.get("printer-state-reasons", [])
+
+        if state == 5:  # Stopped
+            reason = state_reasons[0] if state_reasons else "Printer stopped"
+            return False, str(reason)
+
+        # Check for error states in reasons
+        if state_reasons and state_reasons != ["none"]:
+            for reason in state_reasons:
+                if "error" in str(reason).lower():
+                    return False, str(reason)
+
+        return True, None
+    except Exception as e:
+        return False, str(e)
 
 
 @dataclass
 class PrinterConfig:
-    host: str
-    port: int = 9100
+    printer_name: str
     timeout: float = 4.0
     codepage: str | None = None
     profile: str | None = None
@@ -75,7 +147,7 @@ class EscposPrinterAdapter:
 
     # Utilities
     def _connect(self) -> Any:
-        network_class = _get_network_printer()
+        cups_class = _get_cups_printer()
         profile_obj = None
         if self._config.profile:
             try:
@@ -85,10 +157,8 @@ class EscposPrinterAdapter:
             except Exception as e:
                 _LOGGER.debug("Unknown printer profile '%s': %s", self._config.profile, sanitize_log_message(str(e)))
                 profile_obj = None
-        return network_class(
-            self._config.host,
-            port=self._config.port,
-            timeout=self._config.timeout,
+        return cups_class(
+            self._config.printer_name,
             profile=profile_obj,
         )
 
@@ -127,16 +197,12 @@ class EscposPrinterAdapter:
             self._printer = None
 
     async def _status_check(self, hass: HomeAssistant) -> None:
-        # Non-invasive TCP reachability check
+        # CUPS printer status check
         def _probe() -> tuple[bool, str | None, int | None]:
             start = time.perf_counter()
-            try:
-                with socket.create_connection((self._config.host, self._config.port), timeout=min(self._config.timeout, 3.0)):
-                    latency_ms = int((time.perf_counter() - start) * 1000)
-                    return True, None, latency_ms
-            except OSError as e:
-                latency_ms = int((time.perf_counter() - start) * 1000)
-                return False, str(e), latency_ms
+            ok, err = get_cups_printer_status(self._config.printer_name)
+            latency_ms = int((time.perf_counter() - start) * 1000)
+            return ok, err, latency_ms
 
         ok, err, latency_ms = await hass.async_add_executor_job(_probe)
         now = dt_util.utcnow()
@@ -147,11 +213,11 @@ class EscposPrinterAdapter:
             self._last_error_reason = None
         else:
             self._last_error = now
-            self._last_error_reason = sanitize_log_message(err or "unreachable")
+            self._last_error_reason = sanitize_log_message(err or "unavailable")
         if self._status != ok:
             self._status = ok
             if not ok:
-                _LOGGER.warning("Printer %s:%s not reachable", self._config.host, self._config.port)
+                _LOGGER.warning("CUPS printer '%s' not available: %s", self._config.printer_name, err)
             # Notify listeners
             for cb in list(self._status_listeners):
                 with contextlib.suppress(Exception):

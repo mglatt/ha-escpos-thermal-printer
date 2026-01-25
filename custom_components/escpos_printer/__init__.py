@@ -5,7 +5,6 @@ import os
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_HOST, CONF_PORT
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
 
@@ -16,6 +15,7 @@ from .const import (
     CONF_DEFAULT_CUT,
     CONF_KEEPALIVE,
     CONF_LINE_WIDTH,
+    CONF_PRINTER_NAME,
     CONF_PROFILE,
     CONF_STATUS_INTERVAL,
     CONF_TIMEOUT,
@@ -107,8 +107,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _LOGGER.debug("Registered global services for %s", DOMAIN)
 
     config = PrinterConfig(
-        host=entry.data[CONF_HOST],
-        port=entry.data.get(CONF_PORT, 9100),
+        printer_name=entry.data[CONF_PRINTER_NAME],
         timeout=float(entry.options.get(CONF_TIMEOUT, entry.data.get(CONF_TIMEOUT, 4.0))),
         codepage=entry.options.get(CONF_CODEPAGE) or entry.data.get(CONF_CODEPAGE),
         profile=entry.options.get(CONF_PROFILE) or entry.data.get(CONF_PROFILE),
