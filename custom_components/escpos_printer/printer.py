@@ -405,62 +405,61 @@ class EscposPrinterAdapter:
         hmult = self._map_multiplier(height)
         text_to_print = self._wrap_text(text)
 
-        def _do_print() -> None:  # noqa: PLR0912
+        def _do_full_print(printer: Any) -> None:  # noqa: PLR0912
+            """Print text using the provided printer instance."""
             _LOGGER.debug("print_text begin: text=%r, align=%s", text_to_print[:50] if len(text_to_print) > 50 else text_to_print, align_m)
+            # Optional codepage
+            if self._config.codepage:
+                try:
+                    if hasattr(printer, "charcode"):
+                        printer.charcode(self._config.codepage)
+                except Exception as e:
+                    _LOGGER.debug("Codepage set failed: %s", sanitize_log_message(str(e)))
+
+            # Set style
+            if hasattr(printer, "set"):
+                _LOGGER.debug("Setting printer style: align=%s, bold=%s", align_m, bold)
+                printer.set(align=align_m, bold=bool(bold), underline=ul, width=wmult, height=hmult)
+
+            # Encoding is best-effort; python-escpos handles str internally.
+            if encoding:
+                try:
+                    # Try to set codepage if printer exposes helper
+                    if hasattr(printer, "_set_codepage"):
+                        try:
+                            printer._set_codepage(encoding)
+                        except Exception:
+                            _LOGGER.warning("Unsupported encoding/codepage: %s", encoding)
+                    text_bytes = text_to_print.encode(encoding, errors="replace")
+                    if hasattr(printer, "_raw"):
+                        printer._raw(text_bytes)
+                    else:
+                        printer.text(text_to_print)
+                except Exception as e:
+                    _LOGGER.debug("Encoding error, falling back: %s", e)
+                    printer.text(text_to_print)
+            else:
+                _LOGGER.debug("Sending text to printer...")
+                printer.text(text_to_print)
+                _LOGGER.debug("Text sent to buffer")
+
+        async with self._lock:
+            # Use a single printer instance for the entire operation
             printer = self._printer if self._keepalive and self._printer is not None else self._connect()
             try:
-                # Optional codepage
-                if self._config.codepage:
-                    try:
-                        if hasattr(printer, "charcode"):
-                            printer.charcode(self._config.codepage)
-                    except Exception as e:
-                        _LOGGER.debug("Codepage set failed: %s", sanitize_log_message(str(e)))
-
-                # Set style
-                if hasattr(printer, "set"):
-                    _LOGGER.debug("Setting printer style: align=%s, bold=%s", align_m, bold)
-                    printer.set(align=align_m, bold=bool(bold), underline=ul, width=wmult, height=hmult)
-
-                # Encoding is best-effort; python-escpos handles str internally.
-                if encoding:
-                    try:
-                        # Try to set codepage if printer exposes helper
-                        if hasattr(printer, "_set_codepage"):
-                            try:
-                                printer._set_codepage(encoding)
-                            except Exception:
-                                _LOGGER.warning("Unsupported encoding/codepage: %s", encoding)
-                        text_bytes = text_to_print.encode(encoding, errors="replace")
-                        if hasattr(printer, "_raw"):
-                            printer._raw(text_bytes)
-                        else:
-                            printer.text(text_to_print)
-                    except Exception as e:
-                        _LOGGER.debug("Encoding error, falling back: %s", e)
-                        printer.text(text_to_print)
-                else:
-                    _LOGGER.debug("Sending text to printer...")
-                    printer.text(text_to_print)
-                    _LOGGER.debug("Text sent successfully")
+                await hass.async_add_executor_job(_do_full_print, printer)
+                await self._apply_cut_and_feed(hass, printer, cut, feed)
             except Exception as e:
                 _LOGGER.error("print_text failed: %s", sanitize_log_message(str(e)))
                 raise
             finally:
                 if not self._keepalive:
-                    _LOGGER.debug("Closing printer connection")
-                    with contextlib.suppress(Exception):
+                    _LOGGER.debug("Closing printer connection (this submits the job to CUPS)...")
+                    try:
                         printer.close()
-
-        async with self._lock:
-            await hass.async_add_executor_job(_do_print)
-            printer_for_post = self._printer if self._keepalive and self._printer is not None else self._connect()
-            try:
-                await self._apply_cut_and_feed(hass, printer_for_post, cut, feed)
-            finally:
-                if not self._keepalive:
-                    with contextlib.suppress(Exception):
-                        printer_for_post.close()
+                        _LOGGER.debug("Printer close() completed - job should be submitted to CUPS")
+                    except Exception as e:
+                        _LOGGER.error("Error during printer.close() - job submission may have failed: %s", sanitize_log_message(str(e)))
         # Successful operation implies reachable
         now = dt_util.utcnow()
         self._status = True
