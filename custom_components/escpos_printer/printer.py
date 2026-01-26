@@ -33,10 +33,10 @@ _LOGGER = logging.getLogger(__name__)
 
 
 # Late import of python-escpos to avoid import errors at HA startup if deps pending
-def _get_cups_printer() -> type[Any]:
-    from escpos.printer import CupsPrinter  # noqa: PLC0415
+def _get_lp_printer() -> type[Any]:
+    from escpos.printer import LP  # noqa: PLC0415
 
-    return CupsPrinter  # type: ignore[no-any-return]
+    return LP  # type: ignore[no-any-return]
 
 
 def _get_cups_connection(server: str | None = None) -> Any:
@@ -197,15 +197,15 @@ class EscposPrinterAdapter:
 
     # Utilities
     def _connect(self) -> Any:
-        import cups  # noqa: PLC0415
+        import os  # noqa: PLC0415
 
-        # Set the CUPS server if configured
+        # Set the CUPS server environment variable if configured (used by lp command)
         if self._config.cups_server:
-            _LOGGER.debug("Setting CUPS server to: %s", self._config.cups_server)
-            cups.setServer(self._config.cups_server)
+            _LOGGER.debug("Setting CUPS_SERVER environment to: %s", self._config.cups_server)
+            os.environ["CUPS_SERVER"] = self._config.cups_server
 
-        _LOGGER.debug("Connecting to CUPS printer: %s", self._config.printer_name)
-        cups_class = _get_cups_printer()
+        _LOGGER.debug("Connecting to LP printer: %s", self._config.printer_name)
+        lp_class = _get_lp_printer()
         profile_obj = None
         if self._config.profile:
             try:
@@ -216,11 +216,11 @@ class EscposPrinterAdapter:
                 _LOGGER.debug("Unknown printer profile '%s': %s", self._config.profile, sanitize_log_message(str(e)))
                 profile_obj = None
 
-        printer = cups_class(
+        printer = lp_class(
             self._config.printer_name,
             profile=profile_obj,
         )
-        _LOGGER.debug("CUPS printer connection created: %s", printer)
+        _LOGGER.debug("LP printer connection created: %s", printer)
         return printer
 
     async def start(self, hass: HomeAssistant, *, keepalive: bool, status_interval: int) -> None:
