@@ -29,9 +29,7 @@ Print your Mealie shopping list to a receipt printer with AI-powered categorizat
 2. [OpenAI Conversation integration](https://www.home-assistant.io/integrations/openai_conversation/) configured
 3. This ESC/POS Thermal Printer integration installed and configured
 
-**Available Scripts:**
-- **print_mealie_shopping_list** - Uses OpenAI Conversation integration
-- **print_mealie_shopping_list_rest** - Uses direct OpenAI REST API
+**Script:** `print_mealie_shopping_list`
 
 ## Installation
 
