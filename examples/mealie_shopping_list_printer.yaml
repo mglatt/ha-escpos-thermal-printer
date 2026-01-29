@@ -10,11 +10,9 @@
 #   2. OpenAI Conversation integration configured in HA
 #   3. This ESC/POS Thermal Printer integration installed and configured
 #
-# FINDING YOUR OPENAI AGENT ID (required):
-#   1. Go to Developer Tools > Services
-#   2. Select "Conversation: Process"
-#   3. Click the Agent dropdown - your OpenAI agent will show with its ID
-#   4. The ID looks like: "01HXXXXXXXXXXXXXXXXXXXXXX" (not "conversation.openai")
+# CONFIGURATION:
+#   - Default OpenAI agent: conversation.chatgpt
+#   - To find your agent ID: Developer Tools > Services > Conversation: Process > Agent dropdown
 #
 # INSTALLATION:
 #   1. Copy this file to your Home Assistant config directory
@@ -45,9 +43,9 @@ print_mealie_shopping_list:
           domain: todo
     openai_agent_id:
       name: OpenAI Agent ID
-      description: "OpenAI conversation agent ID (REQUIRED - see instructions above to find it)"
-      required: true
-      example: "01HXXXXXXXXXXXXXXXXXXXXXX"
+      description: "OpenAI conversation agent ID (defaults to conversation.chatgpt)"
+      required: false
+      default: "conversation.chatgpt"
       selector:
         text:
     printer_device_id:
@@ -59,8 +57,9 @@ print_mealie_shopping_list:
           integration: escpos_printer
 
   variables:
-    # Default shopping list entity - change to match your Mealie entity
+    # Default values - change to match your setup
     list_entity: "{{ shopping_list_entity | default('todo.mealie_shopping_list') }}"
+    agent_id: "{{ openai_agent_id | default('conversation.chatgpt') }}"
 
   sequence:
     # Step 1: Get all items from the Mealie shopping list
@@ -135,7 +134,7 @@ print_mealie_shopping_list:
     - alias: "Categorize items with OpenAI"
       service: conversation.process
       data:
-        agent_id: "{{ openai_agent_id }}"
+        agent_id: "{{ agent_id }}"
         text: "{{ categorization_prompt }}"
       response_variable: ai_response
 
