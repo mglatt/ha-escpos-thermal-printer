@@ -8,8 +8,15 @@
 #   1. Mealie integration installed and configured (HACS)
 #      - Creates todo.mealie_* entities for shopping lists
 #   2. OpenAI Conversation integration configured in HA
+#      - Set it as your DEFAULT conversation agent in Settings > Voice Assistants
 #      - Or use rest_command approach shown in alternative below
 #   3. This ESC/POS Thermal Printer integration installed and configured
+#
+# FINDING YOUR OPENAI AGENT ID (if not using default):
+#   1. Go to Developer Tools > Services
+#   2. Select "Conversation: Process"
+#   3. Click the Agent dropdown - your OpenAI agent will show with its ID
+#   4. The ID looks like: "01HXXXXXXXXXXXXXXXXXXXXXX" (not "conversation.openai")
 #
 # INSTALLATION:
 #   1. Copy this file to your Home Assistant config directory
@@ -38,6 +45,13 @@ print_mealie_shopping_list:
       selector:
         entity:
           domain: todo
+    openai_agent_id:
+      name: OpenAI Agent ID
+      description: "OpenAI conversation agent ID (leave empty to use default assistant)"
+      required: false
+      example: "01HXXXXXXXXXXXXXXXXXXXXXX"
+      selector:
+        text:
     printer_device_id:
       name: Printer Device ID
       description: "Target printer device ID (optional - uses all printers if not specified)"
@@ -92,12 +106,10 @@ print_mealie_shopping_list:
           {% endfor %}
         item_count: "{{ shopping_items[list_entity]['items'] | length }}"
 
-    # Step 4: Send to OpenAI for categorization
-    - alias: "Categorize items with OpenAI"
-      service: conversation.process
-      data:
-        agent_id: conversation.openai  # Change to your OpenAI conversation entity
-        text: >-
+    # Step 4: Build the prompt for categorization
+    - alias: "Build categorization prompt"
+      variables:
+        categorization_prompt: >-
           Categorize the following shopping list items by grocery store section.
           Return ONLY valid JSON with no markdown formatting, no code blocks, no explanation.
 
@@ -120,9 +132,27 @@ print_mealie_shopping_list:
 
           Shopping list items:
           {{ items_text }}
-      response_variable: ai_response
 
-    # Step 5: Parse AI response and format receipt
+    # Step 5: Send to OpenAI for categorization
+    # Uses default conversation agent unless openai_agent_id is specified
+    - alias: "Categorize items with OpenAI"
+      choose:
+        - conditions:
+            - condition: template
+              value_template: "{{ openai_agent_id is defined and openai_agent_id }}"
+          sequence:
+            - service: conversation.process
+              data:
+                agent_id: "{{ openai_agent_id }}"
+                text: "{{ categorization_prompt }}"
+              response_variable: ai_response
+      default:
+        - service: conversation.process
+          data:
+            text: "{{ categorization_prompt }}"
+          response_variable: ai_response
+
+    # Step 6: Parse AI response and format receipt
     - alias: "Parse categorized response"
       variables:
         # Extract JSON from the AI response
@@ -131,7 +161,7 @@ print_mealie_shopping_list:
           {% set clean_text = response_text | regex_replace('```json\\s*', '') | regex_replace('```\\s*', '') | trim %}
           {{ clean_text | from_json }}
 
-    # Step 6: Print the receipt header
+    # Step 7: Print the receipt header
     - alias: "Print receipt header"
       service: escpos_printer.print_text_utf8
       data:
@@ -167,7 +197,7 @@ print_mealie_shopping_list:
         feed: 1
         device_id: "{{ printer_device_id | default(omit) }}"
 
-    # Step 7: Print each category and its items
+    # Step 8: Print each category and its items
     - alias: "Print categorized items"
       repeat:
         for_each: "{{ parsed_response.categories }}"
@@ -206,7 +236,7 @@ print_mealie_shopping_list:
               lines: 1
               device_id: "{{ printer_device_id | default(omit) }}"
 
-    # Step 8: Print footer and cut
+    # Step 9: Print footer and cut
     - alias: "Print footer"
       service: escpos_printer.print_text_utf8
       data:
