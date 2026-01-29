@@ -220,8 +220,9 @@ print_mealie_shopping_list:
               device_id: "{{ printer_device_id | default(omit) }}"
 
           # Print each item with checkbox
+          # Note: Must use bracket notation for 'items' key to avoid calling dict.items() method
           - repeat:
-              for_each: "{{ repeat.item.items }}"
+              for_each: "{{ repeat.item['items'] }}"
               sequence:
                 - service: escpos_printer.print_text_utf8
                   data:
@@ -381,7 +382,7 @@ print_mealie_shopping_list_rest:
               feed: 0
 
           - repeat:
-              for_each: "{{ repeat.item.items }}"
+              for_each: "{{ repeat.item['items'] }}"
               sequence:
                 - service: escpos_printer.print_text_utf8
                   data:
