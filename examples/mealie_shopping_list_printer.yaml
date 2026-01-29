@@ -148,12 +148,16 @@ print_mealie_shopping_list:
           {% set clean_text = response_text | regex_replace('```json\\s*', '') | regex_replace('```\\s*', '') | trim %}
           {{ clean_text | from_json }}
 
-    # Step 7: Build and print the complete receipt in one call
-    # This prevents paper cuts between sections (each service call = separate CUPS job)
-    - alias: "Build receipt text"
+    # Step 7: Build and print the complete receipt in ONE service call
+    # Each service call = separate CUPS job = auto-cut, so we must send everything at once
+    - alias: "Build and print receipt"
       variables:
-        receipt_text: >-
+        full_receipt: >-
           {% set ns = namespace(text='') %}
+          {% set ns.text = '        SHOPPING LIST\n' %}
+          {% set ns.text = ns.text ~ '   ' ~ now().strftime('%B %d, %Y at %I:%M %p') ~ '\n' %}
+          {% set ns.text = ns.text ~ '          ' ~ item_count ~ ' items\n' %}
+          {% set ns.text = ns.text ~ '================================\n' %}
           {% for category in parsed_response.categories %}
           {% set ns.text = ns.text ~ '\n' ~ category.name | upper ~ '\n' %}
           {% set ns.text = ns.text ~ '--------------------------------\n' %}
@@ -161,35 +165,16 @@ print_mealie_shopping_list:
           {% set ns.text = ns.text ~ '[ ] ' ~ item ~ '\n' %}
           {% endfor %}
           {% endfor %}
+          {% set ns.text = ns.text ~ '\n================================\n' %}
+          {% set ns.text = ns.text ~ '     Happy Shopping!\n' %}
+          {% set ns.text = ns.text ~ '================================' %}
           {{ ns.text }}
 
-    - alias: "Print header"
+    - alias: "Print receipt"
       service: escpos_printer.print_text_utf8
       data:
-        text: |
-          SHOPPING LIST
-          {{ now().strftime('%B %d, %Y at %I:%M %p') }}
-          {{ item_count }} items
-          ================================
-        align: center
-        bold: false
-        device_id: "{{ printer_device_id | default(omit) }}"
-
-    - alias: "Print categorized items"
-      service: escpos_printer.print_text_utf8
-      data:
-        text: "{{ receipt_text }}"
+        text: "{{ full_receipt }}"
         align: left
-        device_id: "{{ printer_device_id | default(omit) }}"
-
-    - alias: "Print footer and cut"
-      service: escpos_printer.print_text_utf8
-      data:
-        text: |
-          ================================
-               Happy Shopping!
-          ================================
-        align: center
         feed: 3
         cut: full
         device_id: "{{ printer_device_id | default(omit) }}"
