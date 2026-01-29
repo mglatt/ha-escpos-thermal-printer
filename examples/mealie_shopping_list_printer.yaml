@@ -8,10 +8,9 @@
 #   1. Mealie integration installed and configured (HACS)
 #      - Creates todo.mealie_* entities for shopping lists
 #   2. OpenAI Conversation integration configured in HA
-#      - Set it as your DEFAULT conversation agent in Settings > Voice Assistants
 #   3. This ESC/POS Thermal Printer integration installed and configured
 #
-# FINDING YOUR OPENAI AGENT ID (if not using default):
+# FINDING YOUR OPENAI AGENT ID (required):
 #   1. Go to Developer Tools > Services
 #   2. Select "Conversation: Process"
 #   3. Click the Agent dropdown - your OpenAI agent will show with its ID
@@ -46,8 +45,8 @@ print_mealie_shopping_list:
           domain: todo
     openai_agent_id:
       name: OpenAI Agent ID
-      description: "OpenAI conversation agent ID (leave empty to use default assistant)"
-      required: false
+      description: "OpenAI conversation agent ID (REQUIRED - see instructions above to find it)"
+      required: true
       example: "01HXXXXXXXXXXXXXXXXXXXXXX"
       selector:
         text:
@@ -133,23 +132,12 @@ print_mealie_shopping_list:
           {{ items_text }}
 
     # Step 5: Send to OpenAI for categorization
-    # Uses default conversation agent unless openai_agent_id is specified
     - alias: "Categorize items with OpenAI"
-      choose:
-        - conditions:
-            - condition: template
-              value_template: "{{ openai_agent_id is defined and openai_agent_id }}"
-          sequence:
-            - service: conversation.process
-              data:
-                agent_id: "{{ openai_agent_id }}"
-                text: "{{ categorization_prompt }}"
-              response_variable: ai_response
-      default:
-        - service: conversation.process
-          data:
-            text: "{{ categorization_prompt }}"
-          response_variable: ai_response
+      service: conversation.process
+      data:
+        agent_id: "{{ openai_agent_id }}"
+        text: "{{ categorization_prompt }}"
+      response_variable: ai_response
 
     # Step 6: Parse AI response and format receipt
     - alias: "Parse categorized response"
