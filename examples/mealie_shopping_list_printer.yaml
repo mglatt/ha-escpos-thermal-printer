@@ -148,84 +148,41 @@ print_mealie_shopping_list:
           {% set clean_text = response_text | regex_replace('```json\\s*', '') | regex_replace('```\\s*', '') | trim %}
           {{ clean_text | from_json }}
 
-    # Step 7: Print the receipt header
-    - alias: "Print receipt header"
+    # Step 7: Build and print the complete receipt in one call
+    # This prevents paper cuts between sections (each service call = separate CUPS job)
+    - alias: "Build receipt text"
+      variables:
+        receipt_text: >-
+          {% set ns = namespace(text='') %}
+          {% for category in parsed_response.categories %}
+          {% set ns.text = ns.text ~ '\n' ~ category.name | upper ~ '\n' %}
+          {% set ns.text = ns.text ~ '--------------------------------\n' %}
+          {% for item in category['items'] %}
+          {% set ns.text = ns.text ~ '[ ] ' ~ item ~ '\n' %}
+          {% endfor %}
+          {% endfor %}
+          {{ ns.text }}
+
+    - alias: "Print header"
       service: escpos_printer.print_text_utf8
       data:
-        text: "SHOPPING LIST"
+        text: |
+          SHOPPING LIST
+          {{ now().strftime('%B %d, %Y at %I:%M %p') }}
+          {{ item_count }} items
+          ================================
         align: center
-        bold: true
-        width: double
-        height: double
-        feed: 1
+        bold: false
         device_id: "{{ printer_device_id | default(omit) }}"
 
-    - alias: "Print timestamp"
-      service: escpos_printer.print_text_utf8
-      data:
-        text: "{{ now().strftime('%B %d, %Y at %I:%M %p') }}"
-        align: center
-        feed: 1
-        device_id: "{{ printer_device_id | default(omit) }}"
-
-    - alias: "Print item count"
-      service: escpos_printer.print_text_utf8
-      data:
-        text: "{{ item_count }} items"
-        align: center
-        feed: 1
-        device_id: "{{ printer_device_id | default(omit) }}"
-
-    - alias: "Print separator"
-      service: escpos_printer.print_text_utf8
-      data:
-        text: "================================"
-        align: center
-        feed: 1
-        device_id: "{{ printer_device_id | default(omit) }}"
-
-    # Step 8: Print each category and its items
     - alias: "Print categorized items"
-      repeat:
-        for_each: "{{ parsed_response.categories }}"
-        sequence:
-          # Print category header
-          - service: escpos_printer.print_text_utf8
-            data:
-              text: "{{ repeat.item.name | upper }}"
-              align: left
-              bold: true
-              width: double
-              feed: 0
-              device_id: "{{ printer_device_id | default(omit) }}"
+      service: escpos_printer.print_text_utf8
+      data:
+        text: "{{ receipt_text }}"
+        align: left
+        device_id: "{{ printer_device_id | default(omit) }}"
 
-          - service: escpos_printer.print_text_utf8
-            data:
-              text: "--------------------------------"
-              align: left
-              feed: 0
-              device_id: "{{ printer_device_id | default(omit) }}"
-
-          # Print each item with checkbox
-          # Note: Must use bracket notation for 'items' key to avoid calling dict.items() method
-          - repeat:
-              for_each: "{{ repeat.item['items'] }}"
-              sequence:
-                - service: escpos_printer.print_text_utf8
-                  data:
-                    text: "[ ] {{ repeat.item }}"
-                    align: left
-                    feed: 0
-                    device_id: "{{ printer_device_id | default(omit) }}"
-
-          # Add spacing after category
-          - service: escpos_printer.feed
-            data:
-              lines: 1
-              device_id: "{{ printer_device_id | default(omit) }}"
-
-    # Step 9: Print footer and cut
-    - alias: "Print footer"
+    - alias: "Print footer and cut"
       service: escpos_printer.print_text_utf8
       data:
         text: |
