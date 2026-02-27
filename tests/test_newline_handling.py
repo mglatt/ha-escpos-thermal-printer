@@ -95,7 +95,7 @@ class TestWrapText:
 
 
 # ---------------------------------------------------------------------------
-# Integration tests: line-spacing ESC/POS bytes emitted for height > 1
+# Integration tests: extra LF bytes appended for height > 1
 # ---------------------------------------------------------------------------
 
 
@@ -113,8 +113,8 @@ async def _setup_entry(hass):  # type: ignore[no-untyped-def]
     return entry
 
 
-async def test_double_height_text_sets_line_spacing(hass):  # type: ignore[no-untyped-def]
-    """ESC 3 n should be sent before double-height text and ESC 2 after."""
+async def test_double_height_trailing_newline_appends_extra_lf(hass):  # type: ignore[no-untyped-def]
+    """Double-height text ending with \\n should have one extra LF appended."""
     await _setup_entry(hass)
 
     dummy_cls = sys.modules["escpos.printer"].Dummy
@@ -130,22 +130,28 @@ async def test_double_height_text_sets_line_spacing(hass):  # type: ignore[no-un
         await hass.services.async_call(
             DOMAIN,
             "print_text",
-            {"text": "BIG", "height": "double"},
+            {"text": "BIG\n", "height": "double"},
             blocking=True,
         )
 
-    # ESC 3 60  (increase line spacing: 0x1b 0x33 60)
-    assert any(b == bytes([0x1B, 0x33, 60]) for b in raw_calls), (
-        f"Expected ESC 3 60 in raw calls, got: {raw_calls}"
+    # Exactly one extra bare LF should be appended via _raw
+    assert b"\n" in raw_calls, (
+        f"Expected extra LF in _raw calls for double-height text, got: {raw_calls}"
     )
-    # ESC 2  (reset line spacing: 0x1b 0x32)
-    assert any(b == bytes([0x1B, 0x32]) for b in raw_calls), (
-        f"Expected ESC 2 in raw calls, got: {raw_calls}"
+    assert raw_calls.count(b"\n") == 1, (
+        f"Expected exactly one extra LF for hmult=2 (got {raw_calls.count(b'\n')}): {raw_calls}"
+    )
+    # No ESC 3 / ESC 2 should be emitted (those commands were removed)
+    assert not any(b"\x1b\x33" in rc for rc in raw_calls), (
+        "ESC 3 must not be sent — use extra LF instead"
+    )
+    assert not any(rc == bytes([0x1B, 0x32]) for rc in raw_calls), (
+        "ESC 2 must not be sent — use extra LF instead"
     )
 
 
-async def test_normal_height_text_no_line_spacing_cmds(hass):  # type: ignore[no-untyped-def]
-    """No ESC 3 / ESC 2 should be sent for normal-height text."""
+async def test_normal_height_no_extra_lfs(hass):  # type: ignore[no-untyped-def]
+    """Normal-height text must not receive any extra LF bytes."""
     await _setup_entry(hass)
 
     dummy_cls = sys.modules["escpos.printer"].Dummy
@@ -161,20 +167,24 @@ async def test_normal_height_text_no_line_spacing_cmds(hass):  # type: ignore[no
         await hass.services.async_call(
             DOMAIN,
             "print_text",
-            {"text": "Normal"},
+            {"text": "Normal\n"},
             blocking=True,
         )
 
-    assert not any(b == bytes([0x1B, 0x33, 30]) for b in raw_calls), (
+    # No extra bare LF should be injected for hmult=1
+    assert b"\n" not in raw_calls, (
+        f"Extra LF should NOT be added for normal-height text, got _raw calls: {raw_calls}"
+    )
+    assert not any(b"\x1b\x33" in rc for rc in raw_calls), (
         "ESC 3 n should NOT be sent for normal-height text"
     )
-    assert not any(b == bytes([0x1B, 0x32]) for b in raw_calls), (
+    assert not any(rc == bytes([0x1B, 0x32]) for rc in raw_calls), (
         "ESC 2 should NOT be sent for normal-height text"
     )
 
 
-async def test_triple_height_uses_scaled_line_spacing(hass):  # type: ignore[no-untyped-def]
-    """ESC 3 90 (30*3=90) should be sent for triple-height text."""
+async def test_triple_height_trailing_newline_appends_two_extra_lfs(hass):  # type: ignore[no-untyped-def]
+    """Triple-height text ending with \\n should have two extra LFs appended."""
     await _setup_entry(hass)
 
     dummy_cls = sys.modules["escpos.printer"].Dummy
@@ -190,10 +200,14 @@ async def test_triple_height_uses_scaled_line_spacing(hass):  # type: ignore[no-
         await hass.services.async_call(
             DOMAIN,
             "print_text",
-            {"text": "HUGE", "height": "triple"},
+            {"text": "HUGE\n", "height": "triple"},
             blocking=True,
         )
 
-    assert any(b == bytes([0x1B, 0x33, 90]) for b in raw_calls), (
-        f"Expected ESC 3 90 for triple height, got: {raw_calls}"
+    # Two extra LFs appended in a single _raw(b"\n\n") call
+    assert b"\n\n" in raw_calls, (
+        f"Expected extra b'\\n\\n' in _raw calls for triple-height text, got: {raw_calls}"
+    )
+    assert not any(b"\x1b\x33" in rc for rc in raw_calls), (
+        "ESC 3 must not be sent for triple-height text"
     )
