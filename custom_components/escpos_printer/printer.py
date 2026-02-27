@@ -520,6 +520,18 @@ class EscposPrinterAdapter:
                     printer.set(align=align_m, bold=bool(bold), underline=ul, width=wmult, height=hmult,
                                 custom_size=False, normal_textsize=True)
 
+            # Ensure CR+LF line endings before sending to the printer.
+            # ESC/POS standard says LF (0x0A) implies carriage return, but
+            # some printers disable auto-CR, treating LF as "advance paper
+            # only".  Without the explicit CR (0x0D) the print head stays at
+            # the current horizontal position, so each successive service call
+            # starts printing at the end of the previous text instead of the
+            # left margin — producing side-by-side output on the receipt.
+            # Sending CR+LF (0x0D 0x0A) is safe on all ESC/POS printers:
+            # on standard printers the extra CR is a no-op; on printers
+            # without auto-CR it restores the expected column-0 behaviour.
+            text_for_printer = text_to_print.replace("\r\n", "\n").replace("\n", "\r\n")
+
             # Encoding is best-effort; python-escpos handles str internally.
             if encoding:
                 try:
@@ -529,28 +541,27 @@ class EscposPrinterAdapter:
                             printer._set_codepage(encoding)
                         except Exception:
                             _LOGGER.warning("Unsupported encoding/codepage: %s", encoding)
-                    text_bytes = text_to_print.encode(encoding, errors="replace")
+                    text_bytes = text_for_printer.encode(encoding, errors="replace")
                     if hasattr(printer, "_raw"):
                         printer._raw(text_bytes)
                     else:
-                        printer.text(text_to_print)
+                        printer.text(text_for_printer)
                 except Exception as e:
                     _LOGGER.debug("Encoding error, falling back: %s", e)
-                    printer.text(text_to_print)
+                    printer.text(text_for_printer)
             else:
                 _LOGGER.debug("Sending text to printer...")
-                printer.text(text_to_print)
+                printer.text(text_for_printer)
                 _LOGGER.debug("Text sent to buffer")
 
             # When height > 1, the default ESC/POS line spacing (~4.2 mm) is
             # smaller than the physical character height (~hmult × 3 mm).  A
             # single trailing LF does not advance the paper far enough, causing
             # the next printed line to visually overlap the tall characters.
-            # Appending (hmult − 1) extra bare LF bytes accumulates the needed
-            # clearance without relying on ESC 3 line-spacing support, which
-            # some printers silently ignore.
+            # Appending (hmult − 1) extra CR+LF sequences accumulates the
+            # needed clearance without relying on ESC 3 line-spacing support.
             if hmult > 1 and text_to_print.endswith("\n") and hasattr(printer, "_raw"):
-                printer._raw(b"\n" * (hmult - 1))
+                printer._raw(b"\r\n" * (hmult - 1))
 
         async with self._lock:
             # Use a single printer instance for the entire operation

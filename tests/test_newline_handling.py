@@ -113,8 +113,8 @@ async def _setup_entry(hass):  # type: ignore[no-untyped-def]
     return entry
 
 
-async def test_double_height_trailing_newline_appends_extra_lf(hass):  # type: ignore[no-untyped-def]
-    """Double-height text ending with \\n should have one extra LF appended."""
+async def test_double_height_trailing_newline_appends_extra_crlf(hass):  # type: ignore[no-untyped-def]
+    """Double-height text ending with \\n should have one extra CR+LF appended."""
     await _setup_entry(hass)
 
     dummy_cls = sys.modules["escpos.printer"].Dummy
@@ -134,24 +134,24 @@ async def test_double_height_trailing_newline_appends_extra_lf(hass):  # type: i
             blocking=True,
         )
 
-    # Exactly one extra bare LF should be appended via _raw
-    assert b"\n" in raw_calls, (
-        f"Expected extra LF in _raw calls for double-height text, got: {raw_calls}"
+    # Exactly one extra CR+LF (b"\r\n") should be appended via _raw
+    assert b"\r\n" in raw_calls, (
+        f"Expected extra CR+LF in _raw calls for double-height text, got: {raw_calls}"
     )
-    assert raw_calls.count(b"\n") == 1, (
-        f"Expected exactly one extra LF for hmult=2 (got {raw_calls.count(b'\n')}): {raw_calls}"
+    assert raw_calls.count(b"\r\n") == 1, (
+        f"Expected exactly one extra CR+LF for hmult=2 (got {raw_calls.count(b'\\r\\n')}): {raw_calls}"
     )
     # No ESC 3 / ESC 2 should be emitted (those commands were removed)
     assert not any(b"\x1b\x33" in rc for rc in raw_calls), (
-        "ESC 3 must not be sent — use extra LF instead"
+        "ESC 3 must not be sent — use extra CR+LF instead"
     )
     assert not any(rc == bytes([0x1B, 0x32]) for rc in raw_calls), (
-        "ESC 2 must not be sent — use extra LF instead"
+        "ESC 2 must not be sent — use extra CR+LF instead"
     )
 
 
-async def test_normal_height_no_extra_lfs(hass):  # type: ignore[no-untyped-def]
-    """Normal-height text must not receive any extra LF bytes."""
+async def test_normal_height_no_extra_crlf(hass):  # type: ignore[no-untyped-def]
+    """Normal-height text must not receive any extra CR+LF bytes."""
     await _setup_entry(hass)
 
     dummy_cls = sys.modules["escpos.printer"].Dummy
@@ -171,9 +171,9 @@ async def test_normal_height_no_extra_lfs(hass):  # type: ignore[no-untyped-def]
             blocking=True,
         )
 
-    # No extra bare LF should be injected for hmult=1
-    assert b"\n" not in raw_calls, (
-        f"Extra LF should NOT be added for normal-height text, got _raw calls: {raw_calls}"
+    # No extra CR+LF should be injected for hmult=1
+    assert b"\r\n" not in raw_calls, (
+        f"Extra CR+LF should NOT be added for normal-height text, got _raw calls: {raw_calls}"
     )
     assert not any(b"\x1b\x33" in rc for rc in raw_calls), (
         "ESC 3 n should NOT be sent for normal-height text"
@@ -183,8 +183,8 @@ async def test_normal_height_no_extra_lfs(hass):  # type: ignore[no-untyped-def]
     )
 
 
-async def test_triple_height_trailing_newline_appends_two_extra_lfs(hass):  # type: ignore[no-untyped-def]
-    """Triple-height text ending with \\n should have two extra LFs appended."""
+async def test_triple_height_trailing_newline_appends_two_extra_crlfs(hass):  # type: ignore[no-untyped-def]
+    """Triple-height text ending with \\n should have two extra CR+LFs appended."""
     await _setup_entry(hass)
 
     dummy_cls = sys.modules["escpos.printer"].Dummy
@@ -204,9 +204,9 @@ async def test_triple_height_trailing_newline_appends_two_extra_lfs(hass):  # ty
             blocking=True,
         )
 
-    # Two extra LFs appended in a single _raw(b"\n\n") call
-    assert b"\n\n" in raw_calls, (
-        f"Expected extra b'\\n\\n' in _raw calls for triple-height text, got: {raw_calls}"
+    # Two extra CR+LF sequences appended in a single _raw(b"\r\n\r\n") call
+    assert b"\r\n\r\n" in raw_calls, (
+        f"Expected extra b'\\r\\n\\r\\n' in _raw calls for triple-height text, got: {raw_calls}"
     )
     assert not any(b"\x1b\x33" in rc for rc in raw_calls), (
         "ESC 3 must not be sent for triple-height text"
