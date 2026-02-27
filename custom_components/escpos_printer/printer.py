@@ -500,14 +500,6 @@ class EscposPrinterAdapter:
             """Print text using the provided printer instance."""
             _LOGGER.debug("print_text begin: text=%r, align=%s", text_to_print[:50] if len(text_to_print) > 50 else text_to_print, align_m)
 
-            # ESC @ — initialize printer at the start of every job.
-            # This resets the print head to column 0 (left margin) and clears
-            # any state left by the previous CUPS job.  Without it, successive
-            # service calls each print at the horizontal position where the
-            # last job ended, making them appear side-by-side on the receipt.
-            if hasattr(printer, "_raw"):
-                printer._raw(bytes([0x1B, 0x40]))  # ESC @
-
             # Optional codepage
             if self._config.codepage:
                 try:
@@ -571,6 +563,15 @@ class EscposPrinterAdapter:
             # needed clearance without relying on ESC 3 line-spacing support.
             if hmult > 1 and text_to_print.endswith("\n") and hasattr(printer, "_raw"):
                 printer._raw(b"\r\n" * (hmult - 1))
+
+            # ESC @ — sent at the END of each job so the next CUPS job starts
+            # with the print head at column 0 (left margin).  Placing it at
+            # the end (rather than the start) ensures the current job's text
+            # is fully buffered before the reset is issued — sending ESC @
+            # at the start caused the printer to clear its hardware buffer
+            # mid-reset, swallowing the text that followed.
+            if hasattr(printer, "_raw"):
+                printer._raw(bytes([0x1B, 0x40]))  # ESC @
 
         async with self._lock:
             # Use a single printer instance for the entire operation
