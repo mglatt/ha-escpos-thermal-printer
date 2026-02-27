@@ -360,7 +360,7 @@ class EscposPrinterAdapter:
             "last_error_reason": self._last_error_reason,
         }
 
-    def _wrap_text(self, text: str) -> str:
+    def _wrap_text(self, text: str, width_mult: int = 1) -> str:
         """Wrap text to fit within the configured line width.
 
         Preserves all newlines including trailing ones. Python's
@@ -369,6 +369,8 @@ class EscposPrinterAdapter:
 
         Args:
             text: Text to wrap.
+            width_mult: Character width multiplier (1=normal, 2=double, etc.).
+                        The effective wrap column count is line_width // width_mult.
 
         Returns:
             Wrapped text with original newline structure preserved.
@@ -376,6 +378,10 @@ class EscposPrinterAdapter:
         cols = max(0, int(self._config.line_width or 0))
         if cols <= 0:
             return text
+
+        # Reduce effective column count by the width multiplier so that
+        # double-width (or wider) characters don't overflow the paper.
+        effective_cols = max(1, cols // max(1, width_mult))
 
         # splitlines() strips trailing newlines — count them so we can restore
         trailing_newlines = len(text) - len(text.rstrip("\n"))
@@ -386,7 +392,7 @@ class EscposPrinterAdapter:
             if not line:
                 wrapped_lines.append("")
                 continue
-            wrapped_lines.extend(textwrap.wrap(line, width=cols, replace_whitespace=False, drop_whitespace=False))
+            wrapped_lines.extend(textwrap.wrap(line, width=effective_cols, replace_whitespace=False, drop_whitespace=False))
 
         result = "\n".join(wrapped_lines)
 
@@ -486,11 +492,14 @@ class EscposPrinterAdapter:
         ul = self._map_underline(underline)
         wmult = self._map_multiplier(width)
         hmult = self._map_multiplier(height)
-        text_to_print = self._wrap_text(text)
+        # Account for character width when wrapping so doubled/tripled text
+        # doesn't overflow the physical paper width.
+        text_to_print = self._wrap_text(text, width_mult=wmult)
 
         def _do_full_print(printer: Any) -> None:  # noqa: PLR0912
             """Print text using the provided printer instance."""
             _LOGGER.debug("print_text begin: text=%r, align=%s", text_to_print[:50] if len(text_to_print) > 50 else text_to_print, align_m)
+
             # Optional codepage
             if self._config.codepage:
                 try:
@@ -512,6 +521,18 @@ class EscposPrinterAdapter:
                     printer.set(align=align_m, bold=bool(bold), underline=ul, width=wmult, height=hmult,
                                 custom_size=False, normal_textsize=True)
 
+            # Ensure CR+LF line endings before sending to the printer.
+            # ESC/POS standard says LF (0x0A) implies carriage return, but
+            # some printers disable auto-CR, treating LF as "advance paper
+            # only".  Without the explicit CR (0x0D) the print head stays at
+            # the current horizontal position, so each successive service call
+            # starts printing at the end of the previous text instead of the
+            # left margin — producing side-by-side output on the receipt.
+            # Sending CR+LF (0x0D 0x0A) is safe on all ESC/POS printers:
+            # on standard printers the extra CR is a no-op; on printers
+            # without auto-CR it restores the expected column-0 behaviour.
+            text_for_printer = text_to_print.replace("\r\n", "\n").replace("\n", "\r\n")
+
             # Encoding is best-effort; python-escpos handles str internally.
             if encoding:
                 try:
@@ -521,18 +542,36 @@ class EscposPrinterAdapter:
                             printer._set_codepage(encoding)
                         except Exception:
                             _LOGGER.warning("Unsupported encoding/codepage: %s", encoding)
-                    text_bytes = text_to_print.encode(encoding, errors="replace")
+                    text_bytes = text_for_printer.encode(encoding, errors="replace")
                     if hasattr(printer, "_raw"):
                         printer._raw(text_bytes)
                     else:
-                        printer.text(text_to_print)
+                        printer.text(text_for_printer)
                 except Exception as e:
                     _LOGGER.debug("Encoding error, falling back: %s", e)
-                    printer.text(text_to_print)
+                    printer.text(text_for_printer)
             else:
                 _LOGGER.debug("Sending text to printer...")
-                printer.text(text_to_print)
+                printer.text(text_for_printer)
                 _LOGGER.debug("Text sent to buffer")
+
+            # When height > 1, the default ESC/POS line spacing (~4.2 mm) is
+            # smaller than the physical character height (~hmult × 3 mm).  A
+            # single trailing LF does not advance the paper far enough, causing
+            # the next printed line to visually overlap the tall characters.
+            # Appending (hmult − 1) extra CR+LF sequences accumulates the
+            # needed clearance without relying on ESC 3 line-spacing support.
+            if hmult > 1 and text_to_print.endswith("\n") and hasattr(printer, "_raw"):
+                printer._raw(b"\r\n" * (hmult - 1))
+
+            # ESC @ — sent at the END of each job so the next CUPS job starts
+            # with the print head at column 0 (left margin).  Placing it at
+            # the end (rather than the start) ensures the current job's text
+            # is fully buffered before the reset is issued — sending ESC @
+            # at the start caused the printer to clear its hardware buffer
+            # mid-reset, swallowing the text that followed.
+            if hasattr(printer, "_raw"):
+                printer._raw(bytes([0x1B, 0x40]))  # ESC @
 
         async with self._lock:
             # Use a single printer instance for the entire operation
