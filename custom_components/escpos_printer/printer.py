@@ -499,6 +499,15 @@ class EscposPrinterAdapter:
         def _do_full_print(printer: Any) -> None:  # noqa: PLR0912
             """Print text using the provided printer instance."""
             _LOGGER.debug("print_text begin: text=%r, align=%s", text_to_print[:50] if len(text_to_print) > 50 else text_to_print, align_m)
+
+            # ESC @ — initialize printer at the start of every job.
+            # This resets the print head to column 0 (left margin) and clears
+            # any state left by the previous CUPS job.  Without it, successive
+            # service calls each print at the horizontal position where the
+            # last job ended, making them appear side-by-side on the receipt.
+            if hasattr(printer, "_raw"):
+                printer._raw(bytes([0x1B, 0x40]))  # ESC @
+
             # Optional codepage
             if self._config.codepage:
                 try:

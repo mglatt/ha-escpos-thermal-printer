@@ -134,6 +134,10 @@ async def test_double_height_trailing_newline_appends_extra_crlf(hass):  # type:
             blocking=True,
         )
 
+    # ESC @ must be the first _raw call (print-position reset)
+    assert raw_calls and raw_calls[0] == bytes([0x1B, 0x40]), (
+        f"Expected ESC @ as first _raw call, got: {raw_calls}"
+    )
     # Exactly one extra CR+LF (b"\r\n") should be appended via _raw
     assert b"\r\n" in raw_calls, (
         f"Expected extra CR+LF in _raw calls for double-height text, got: {raw_calls}"
@@ -171,6 +175,10 @@ async def test_normal_height_no_extra_crlf(hass):  # type: ignore[no-untyped-def
             blocking=True,
         )
 
+    # ESC @ must be the first _raw call (print-position reset)
+    assert raw_calls and raw_calls[0] == bytes([0x1B, 0x40]), (
+        f"Expected ESC @ as first _raw call, got: {raw_calls}"
+    )
     # No extra CR+LF should be injected for hmult=1
     assert b"\r\n" not in raw_calls, (
         f"Extra CR+LF should NOT be added for normal-height text, got _raw calls: {raw_calls}"
@@ -204,6 +212,10 @@ async def test_triple_height_trailing_newline_appends_two_extra_crlfs(hass):  # 
             blocking=True,
         )
 
+    # ESC @ must be the first _raw call (print-position reset)
+    assert raw_calls and raw_calls[0] == bytes([0x1B, 0x40]), (
+        f"Expected ESC @ as first _raw call, got: {raw_calls}"
+    )
     # Two extra CR+LF sequences appended in a single _raw(b"\r\n\r\n") call
     assert b"\r\n\r\n" in raw_calls, (
         f"Expected extra b'\\r\\n\\r\\n' in _raw calls for triple-height text, got: {raw_calls}"
