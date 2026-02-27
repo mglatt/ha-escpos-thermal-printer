@@ -520,16 +520,6 @@ class EscposPrinterAdapter:
                     printer.set(align=align_m, bold=bool(bold), underline=ul, width=wmult, height=hmult,
                                 custom_size=False, normal_textsize=True)
 
-            # When height > 1, the default ESC/POS line spacing (~4.2 mm) is
-            # smaller than the character height (~3 mm * hmult), so a bare LF
-            # inside the text doesn't advance the paper far enough and the next
-            # printed line visually overlaps.  Increase line spacing to
-            # 30 * hmult / 180 inches so every LF fully clears the characters.
-            _ESC = 0x1B
-            if hmult > 1 and hasattr(printer, "_raw"):
-                line_spacing = min(255, 30 * hmult)
-                printer._raw(bytes([_ESC, 0x33, line_spacing]))  # ESC 3 n
-
             # Encoding is best-effort; python-escpos handles str internally.
             if encoding:
                 try:
@@ -552,10 +542,15 @@ class EscposPrinterAdapter:
                 printer.text(text_to_print)
                 _LOGGER.debug("Text sent to buffer")
 
-            # Reset line spacing to default so that subsequent feed lines
-            # (and the next print job) use the standard advance.
-            if hmult > 1 and hasattr(printer, "_raw"):
-                printer._raw(bytes([_ESC, 0x32]))  # ESC 2 = default line spacing
+            # When height > 1, the default ESC/POS line spacing (~4.2 mm) is
+            # smaller than the physical character height (~hmult × 3 mm).  A
+            # single trailing LF does not advance the paper far enough, causing
+            # the next printed line to visually overlap the tall characters.
+            # Appending (hmult − 1) extra bare LF bytes accumulates the needed
+            # clearance without relying on ESC 3 line-spacing support, which
+            # some printers silently ignore.
+            if hmult > 1 and text_to_print.endswith("\n") and hasattr(printer, "_raw"):
+                printer._raw(b"\n" * (hmult - 1))
 
         async with self._lock:
             # Use a single printer instance for the entire operation
