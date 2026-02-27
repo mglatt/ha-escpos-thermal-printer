@@ -521,16 +521,16 @@ class EscposPrinterAdapter:
                     printer.set(align=align_m, bold=bool(bold), underline=ul, width=wmult, height=hmult,
                                 custom_size=False, normal_textsize=True)
 
-            # Send CR (0x0D) to move the print head to column 0 before printing.
-            # Some printers treat LF as "advance paper only" (no auto-CR), so
-            # after the previous CUPS job the print head may be left at a
-            # non-zero column.  A bare CR is safe on all ESC/POS printers —
-            # it does not clear buffers or change settings — and is a no-op
-            # when the head is already at column 0.
-            if hasattr(printer, "_raw"):
-                printer._raw(b"\r")
-
-            # Normalise to CR+LF so that each newline resets the column too.
+            # Ensure CR+LF line endings before sending to the printer.
+            # ESC/POS standard says LF (0x0A) implies carriage return, but
+            # some printers disable auto-CR, treating LF as "advance paper
+            # only".  Without the explicit CR (0x0D) the print head stays at
+            # the current horizontal position, so each successive service call
+            # starts printing at the end of the previous text instead of the
+            # left margin — producing side-by-side output on the receipt.
+            # Sending CR+LF (0x0D 0x0A) is safe on all ESC/POS printers:
+            # on standard printers the extra CR is a no-op; on printers
+            # without auto-CR it restores the expected column-0 behaviour.
             text_for_printer = text_to_print.replace("\r\n", "\n").replace("\n", "\r\n")
 
             # Encoding is best-effort; python-escpos handles str internally.
@@ -563,6 +563,15 @@ class EscposPrinterAdapter:
             # needed clearance without relying on ESC 3 line-spacing support.
             if hmult > 1 and text_to_print.endswith("\n") and hasattr(printer, "_raw"):
                 printer._raw(b"\r\n" * (hmult - 1))
+
+            # ESC @ — sent at the END of each job so the next CUPS job starts
+            # with the print head at column 0 (left margin).  Placing it at
+            # the end (rather than the start) ensures the current job's text
+            # is fully buffered before the reset is issued — sending ESC @
+            # at the start caused the printer to clear its hardware buffer
+            # mid-reset, swallowing the text that followed.
+            if hasattr(printer, "_raw"):
+                printer._raw(bytes([0x1B, 0x40]))  # ESC @
 
         async with self._lock:
             # Use a single printer instance for the entire operation

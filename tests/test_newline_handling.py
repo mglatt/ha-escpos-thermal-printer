@@ -134,21 +134,16 @@ async def test_double_height_trailing_newline_appends_extra_crlf(hass):  # type:
             blocking=True,
         )
 
-    # Leading CR must be present (moves print head to column 0 before text)
-    assert b"\r" in raw_calls, (
-        f"Expected leading CR (b'\\r') in _raw calls, got: {raw_calls}"
-    )
-    # ESC @ must NOT be present — it clears the print buffer and drops text
-    assert not any(b"\x1b\x40" in rc for rc in raw_calls), (
-        f"ESC @ must not be sent — it clears the print buffer: {raw_calls}"
+    # ESC @ must be the last _raw call (print-position reset for next job)
+    assert raw_calls and raw_calls[-1] == bytes([0x1B, 0x40]), (
+        f"Expected ESC @ as last _raw call, got: {raw_calls}"
     )
     # Exactly one extra CR+LF (b"\r\n") should be appended via _raw
     assert b"\r\n" in raw_calls, (
         f"Expected extra CR+LF in _raw calls for double-height text, got: {raw_calls}"
     )
-    _crlf = b"\r\n"
-    assert raw_calls.count(_crlf) == 1, (
-        f"Expected exactly one extra CR+LF for hmult=2 (got {raw_calls.count(_crlf)}): {raw_calls}"
+    assert raw_calls.count(b"\r\n") == 1, (
+        f"Expected exactly one extra CR+LF for hmult=2 (got {raw_calls.count(b'\\r\\n')}): {raw_calls}"
     )
     # No ESC 3 / ESC 2 should be emitted (those commands were removed)
     assert not any(b"\x1b\x33" in rc for rc in raw_calls), (
@@ -180,13 +175,9 @@ async def test_normal_height_no_extra_crlf(hass):  # type: ignore[no-untyped-def
             blocking=True,
         )
 
-    # Leading CR must be present (moves print head to column 0 before text)
-    assert b"\r" in raw_calls, (
-        f"Expected leading CR (b'\\r') in _raw calls, got: {raw_calls}"
-    )
-    # ESC @ must NOT be present — it clears the print buffer and drops text
-    assert not any(b"\x1b\x40" in rc for rc in raw_calls), (
-        f"ESC @ must not be sent — it clears the print buffer: {raw_calls}"
+    # ESC @ must be the last _raw call (print-position reset for next job)
+    assert raw_calls and raw_calls[-1] == bytes([0x1B, 0x40]), (
+        f"Expected ESC @ as last _raw call, got: {raw_calls}"
     )
     # No extra CR+LF should be injected for hmult=1
     assert b"\r\n" not in raw_calls, (
@@ -221,13 +212,9 @@ async def test_triple_height_trailing_newline_appends_two_extra_crlfs(hass):  # 
             blocking=True,
         )
 
-    # Leading CR must be present (moves print head to column 0 before text)
-    assert b"\r" in raw_calls, (
-        f"Expected leading CR (b'\\r') in _raw calls, got: {raw_calls}"
-    )
-    # ESC @ must NOT be present — it clears the print buffer and drops text
-    assert not any(b"\x1b\x40" in rc for rc in raw_calls), (
-        f"ESC @ must not be sent — it clears the print buffer: {raw_calls}"
+    # ESC @ must be the last _raw call (print-position reset for next job)
+    assert raw_calls and raw_calls[-1] == bytes([0x1B, 0x40]), (
+        f"Expected ESC @ as last _raw call, got: {raw_calls}"
     )
     # Two extra CR+LF sequences appended in a single _raw(b"\r\n\r\n") call
     assert b"\r\n\r\n" in raw_calls, (
