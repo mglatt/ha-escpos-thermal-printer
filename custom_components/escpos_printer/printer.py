@@ -536,7 +536,8 @@ class EscposPrinterAdapter:
 
         async with self._lock:
             # Use a single printer instance for the entire operation
-            printer = self._printer if self._keepalive and self._printer is not None else self._connect()
+            printer = (self._printer if self._keepalive and self._printer is not None
+                       else await hass.async_add_executor_job(self._connect))
             try:
                 await hass.async_add_executor_job(_do_full_print, printer)
                 await self._apply_cut_and_feed(hass, printer, cut, feed)
@@ -593,7 +594,8 @@ class EscposPrinterAdapter:
             printer.qr(data, size=qsize, ec=_map_qr_ec(qec))
 
         async with self._lock:
-            printer = self._printer if self._keepalive and self._printer is not None else self._connect()
+            printer = (self._printer if self._keepalive and self._printer is not None
+                       else await hass.async_add_executor_job(self._connect))
             try:
                 await hass.async_add_executor_job(_do_print, printer)
                 await self._apply_cut_and_feed(hass, printer, cut, feed)
@@ -638,7 +640,7 @@ class EscposPrinterAdapter:
         else:
             _LOGGER.debug("Opening local image: %s", image)
             path = validate_local_image_path(image)
-            img_obj = Image.open(path)
+            img_obj = await hass.async_add_executor_job(Image.open, path)
 
         align_m = self._map_align(align)
 
@@ -665,7 +667,8 @@ class EscposPrinterAdapter:
                 printer.text("[image printing not supported by this printer]\n")
 
         async with self._lock:
-            printer = self._printer if self._keepalive and self._printer is not None else self._connect()
+            printer = (self._printer if self._keepalive and self._printer is not None
+                       else await hass.async_add_executor_job(self._connect))
             try:
                 await hass.async_add_executor_job(_do_print, printer)
                 await self._apply_cut_and_feed(hass, printer, cut, feed)
@@ -705,7 +708,8 @@ class EscposPrinterAdapter:
                         printer.text("\n")
 
         async with self._lock:
-            printer = self._printer if self._keepalive and self._printer is not None else self._connect()
+            printer = (self._printer if self._keepalive and self._printer is not None
+                       else await hass.async_add_executor_job(self._connect))
             try:
                 await hass.async_add_executor_job(_feed_inner, printer)
                 # Submit to CUPS
@@ -726,7 +730,8 @@ class EscposPrinterAdapter:
             printer.cut(mode=cut_mode)
 
         async with self._lock:
-            printer = self._printer if self._keepalive and self._printer is not None else self._connect()
+            printer = (self._printer if self._keepalive and self._printer is not None
+                       else await hass.async_add_executor_job(self._connect))
             try:
                 await hass.async_add_executor_job(_cut_inner, printer)
                 # Submit to CUPS
@@ -800,7 +805,8 @@ class EscposPrinterAdapter:
                     raise
 
         async with self._lock:
-            printer = self._printer if self._keepalive and self._printer is not None else self._connect()
+            printer = (self._printer if self._keepalive and self._printer is not None
+                       else await hass.async_add_executor_job(self._connect))
             try:
                 await hass.async_add_executor_job(_do_print, printer)
                 await self._apply_cut_and_feed(hass, printer, cut, feed)
@@ -826,7 +832,8 @@ class EscposPrinterAdapter:
                 _LOGGER.warning("Printer does not support buzzer")
 
         async with self._lock:
-            printer = self._printer if self._keepalive and self._printer is not None else self._connect()
+            printer = (self._printer if self._keepalive and self._printer is not None
+                       else await hass.async_add_executor_job(self._connect))
             try:
                 await hass.async_add_executor_job(_beep_inner, printer)
                 # Submit to CUPS
