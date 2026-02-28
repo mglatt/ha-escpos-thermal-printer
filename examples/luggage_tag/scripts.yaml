@@ -1,0 +1,143 @@
+# Luggage Tag — Home Assistant Scripts & Shell Commands
+#
+# This file contains everything needed to generate and print luggage tags
+# from the HA UI.  Merge each section into the corresponding part of your
+# configuration.yaml.
+#
+# Prerequisites:
+#   1.  Copy generate_tag.py to /config/scripts/generate_tag.py
+#   2.  Add the input helpers from input_helpers.yaml
+#   3.  Merge the shell_command and script blocks below
+#   4.  Restart Home Assistant (or reload shell commands + scripts)
+#
+# The print step targets all configured escpos_printer devices.
+# To target a specific printer, add a `target: { device_id: <id> }` key
+# to the escpos_printer.print_image service call.
+
+# ------------------------------------------------------------------
+# Shell Commands
+# ------------------------------------------------------------------
+# Merge into configuration.yaml under `shell_command:`
+#
+# shell_command:
+#   generate_luggage_tag: >-
+#     python3 /config/scripts/generate_tag.py
+#     --name "{{ states('input_text.luggage_passenger_name') }}"
+#     --destination "{{ states('input_text.luggage_destination') }}"
+#     --origin "{{ states('input_text.luggage_origin') }}"
+#     --flight "{{ states('input_text.luggage_flight_number') }}"
+#     --date "{{ states('input_text.luggage_travel_date') }}"
+#     --phone "{{ states('input_text.luggage_phone') }}"
+#     --email "{{ states('input_text.luggage_email') }}"
+#     --design "{{ states('input_select.luggage_tag_design') }}"
+#     --output /config/www/luggage_tag.png
+
+shell_command:
+  generate_luggage_tag: >-
+    python3 /config/scripts/generate_tag.py
+    --name "{{ states('input_text.luggage_passenger_name') }}"
+    --destination "{{ states('input_text.luggage_destination') }}"
+    --origin "{{ states('input_text.luggage_origin') }}"
+    --flight "{{ states('input_text.luggage_flight_number') }}"
+    --date "{{ states('input_text.luggage_travel_date') }}"
+    --phone "{{ states('input_text.luggage_phone') }}"
+    --email "{{ states('input_text.luggage_email') }}"
+    --design "{{ states('input_select.luggage_tag_design') }}"
+    --output /config/www/luggage_tag.png
+
+# ------------------------------------------------------------------
+# Scripts
+# ------------------------------------------------------------------
+# Merge into configuration.yaml under `script:` (or scripts.yaml).
+
+script:
+  # ----------------------------------------------------------------
+  # Main entry point — generate image, then print it
+  # ----------------------------------------------------------------
+  print_luggage_tag:
+    alias: Print Luggage Tag
+    icon: mdi:bag-suitcase
+    description: >-
+      Generate a fold-over luggage tag from the input helpers and
+      send it to the thermal printer.
+    sequence:
+      # Step 1 — render the tag image
+      - service: shell_command.generate_luggage_tag
+        data: {}
+
+      # Short pause to ensure the file is flushed to disk
+      - delay:
+          seconds: 1
+
+      # Step 2 — print the generated image
+      - service: escpos_printer.print_image
+        data:
+          image: /config/www/luggage_tag.png
+          high_density: true
+          align: center
+          cut: partial
+          feed: 3
+
+  # ----------------------------------------------------------------
+  # Convenience shortcuts for each design
+  # ----------------------------------------------------------------
+  print_luggage_tag_classic:
+    alias: Print Luggage Tag (Classic)
+    icon: mdi:bag-suitcase
+    description: Force the Classic Airline design regardless of the input_select.
+    sequence:
+      - service: input_select.select_option
+        target:
+          entity_id: input_select.luggage_tag_design
+        data:
+          option: classic
+      - service: script.print_luggage_tag
+
+  print_luggage_tag_bold:
+    alias: Print Luggage Tag (Bold)
+    icon: mdi:bag-suitcase
+    description: Force the Bold & Visible design regardless of the input_select.
+    sequence:
+      - service: input_select.select_option
+        target:
+          entity_id: input_select.luggage_tag_design
+        data:
+          option: bold
+      - service: script.print_luggage_tag
+
+  print_luggage_tag_contact:
+    alias: Print Luggage Tag (Contact)
+    icon: mdi:bag-suitcase
+    description: Force the Contact Card design regardless of the input_select.
+    sequence:
+      - service: input_select.select_option
+        target:
+          entity_id: input_select.luggage_tag_design
+        data:
+          option: contact
+      - service: script.print_luggage_tag
+
+# ------------------------------------------------------------------
+# Automation — print a tag when all required fields are filled
+# ------------------------------------------------------------------
+# Optional: uncomment and merge into automations.yaml to auto-print
+# whenever the passenger name or destination changes (and both are set).
+#
+# automation:
+#   - alias: Auto Print Luggage Tag
+#     description: >-
+#       Automatically generate and print a luggage tag whenever the
+#       passenger name or destination input is updated, as long as
+#       both fields are non-empty.
+#     trigger:
+#       - platform: state
+#         entity_id:
+#           - input_text.luggage_passenger_name
+#           - input_text.luggage_destination
+#     condition:
+#       - condition: template
+#         value_template: >-
+#           {{ states('input_text.luggage_passenger_name') | length > 0
+#              and states('input_text.luggage_destination') | length > 0 }}
+#     action:
+#       - service: script.print_luggage_tag
