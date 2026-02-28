@@ -16,7 +16,9 @@
 # Prerequisites:
 #   1. Add the input helpers from input_helpers.yaml to your HA config
 #   2. Merge the script blocks below into your scripts.yaml
-#   3. Replace YOUR_DEVICE_ID with your printer's device ID
+#   3. Set your printer device ID in the dashboard button card's
+#      tap_action data (printer_device_id field) — it flows through
+#      automatically to all sub-scripts
 #   4. Restart Home Assistant (or reload scripts)
 #
 # Notes:
@@ -32,25 +34,23 @@ script:
   print_luggage_tag:
     alias: Print Luggage Tag
     icon: mdi:bag-suitcase
+    mode: restart
     description: >-
       Print a fold-over luggage tag using the design selected in
       input_select.luggage_tag_design.
+    fields:
+      printer_device_id:
+        description: Target printer device ID
+        required: true
+        selector:
+          device:
+            integration: escpos_printer
+    variables:
+      design: "{% set d = states('input_select.luggage_tag_design') | lower | trim %}{{ d if d in ['classic', 'bold', 'contact'] else 'classic' }}"
     sequence:
-      - choose:
-          - conditions:
-              - condition: state
-                entity_id: input_select.luggage_tag_design
-                state: bold
-            sequence:
-              - service: script.print_luggage_tag_bold
-          - conditions:
-              - condition: state
-                entity_id: input_select.luggage_tag_design
-                state: contact
-            sequence:
-              - service: script.print_luggage_tag_contact
-        default:
-          - service: script.print_luggage_tag_classic
+      - service: "script.print_luggage_tag_{{ design }}"
+        data:
+          printer_device_id: "{{ printer_device_id }}"
 
   # =================================================================
   # DESIGN 1 — Classic Airline
@@ -74,7 +74,16 @@ script:
   print_luggage_tag_classic:
     alias: Print Luggage Tag (Classic)
     icon: mdi:bag-suitcase
+    mode: restart
+    fields:
+      printer_device_id:
+        description: Target printer device ID
+        required: true
+        selector:
+          device:
+            integration: escpos_printer
     variables:
+      device: "{{ printer_device_id }}"
       dest: "{{ states('input_text.luggage_destination') | upper | trim }}"
       origin: "{{ states('input_text.luggage_origin') | upper | trim }}"
       name: "{{ states('input_text.luggage_passenger_name') | upper | trim }}"
@@ -82,7 +91,6 @@ script:
       date: "{{ states('input_text.luggage_travel_date') | upper | trim }}"
       phone: "{{ states('input_text.luggage_phone') | trim }}"
       email: "{{ states('input_text.luggage_email') | trim }}"
-      device: YOUR_DEVICE_ID
     sequence:
       # --- BACK FACE (simple identifier) ---
 
@@ -369,13 +377,21 @@ script:
   print_luggage_tag_bold:
     alias: Print Luggage Tag (Bold)
     icon: mdi:bag-suitcase
+    mode: restart
+    fields:
+      printer_device_id:
+        description: Target printer device ID
+        required: true
+        selector:
+          device:
+            integration: escpos_printer
     variables:
+      device: "{{ printer_device_id }}"
       dest: "{{ states('input_text.luggage_destination') | upper | trim }}"
       name: "{{ states('input_text.luggage_passenger_name') | upper | trim }}"
       flight: "{{ states('input_text.luggage_flight_number') | upper | trim }}"
       date: "{{ states('input_text.luggage_travel_date') | upper | trim }}"
       phone: "{{ states('input_text.luggage_phone') | trim }}"
-      device: YOUR_DEVICE_ID
     sequence:
       # --- BACK FACE ---
 
@@ -581,7 +597,16 @@ script:
   print_luggage_tag_contact:
     alias: Print Luggage Tag (Contact)
     icon: mdi:bag-suitcase
+    mode: restart
+    fields:
+      printer_device_id:
+        description: Target printer device ID
+        required: true
+        selector:
+          device:
+            integration: escpos_printer
     variables:
+      device: "{{ printer_device_id }}"
       dest: "{{ states('input_text.luggage_destination') | upper | trim }}"
       origin: "{{ states('input_text.luggage_origin') | upper | trim }}"
       name: "{{ states('input_text.luggage_passenger_name') | upper | trim }}"
@@ -589,7 +614,6 @@ script:
       date: "{{ states('input_text.luggage_travel_date') | upper | trim }}"
       phone: "{{ states('input_text.luggage_phone') | trim }}"
       email: "{{ states('input_text.luggage_email') | trim }}"
-      device: YOUR_DEVICE_ID
     sequence:
       # --- BACK FACE ---
 
