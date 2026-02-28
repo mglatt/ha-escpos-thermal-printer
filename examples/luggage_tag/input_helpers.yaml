@@ -1,0 +1,51 @@
+# Luggage Tag — Home Assistant Input Helpers
+#
+# Merge the blocks below into your configuration.yaml (or a package file)
+# to create the UI fields used by the luggage-tag scripts.
+
+input_text:
+  luggage_passenger_name:
+    name: Passenger Name
+    icon: mdi:account
+    max: 40
+
+  luggage_destination:
+    name: Destination
+    icon: mdi:airplane-landing
+    max: 6
+    # IATA airport code, city name, or any short label
+
+  luggage_origin:
+    name: Origin
+    icon: mdi:airplane-takeoff
+    max: 6
+
+  luggage_flight_number:
+    name: Flight Number
+    icon: mdi:airplane
+    max: 12
+
+  luggage_travel_date:
+    name: Travel Date
+    icon: mdi:calendar
+    max: 20
+
+  luggage_phone:
+    name: Contact Phone
+    icon: mdi:phone
+    max: 20
+
+  luggage_email:
+    name: Contact Email
+    icon: mdi:email
+    max: 60
+
+input_select:
+  luggage_tag_design:
+    name: Tag Design
+    icon: mdi:tag-outline
+    options:
+      - classic
+      - bold
+      - contact
+    initial: classic
