@@ -1,12 +1,7 @@
 # Luggage Tag — Home Assistant Input Helpers
 #
-# Add these to your configuration.yaml (or a !include'd file) to create
-# the UI input fields used by the luggage-tag automation scripts.
-#
-#   input_text: !include input_helpers.yaml
-#
-# Or merge the blocks below into your existing input_text / input_select
-# sections.
+# Merge the blocks below into your configuration.yaml (or a package file)
+# to create the UI fields used by the luggage-tag scripts.
 
 input_text:
   luggage_passenger_name:

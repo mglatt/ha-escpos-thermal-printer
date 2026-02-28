@@ -1,143 +1,510 @@
-# Luggage Tag — Home Assistant Scripts & Shell Commands
+# Luggage Tag — Home Assistant Scripts
 #
-# This file contains everything needed to generate and print luggage tags
-# from the HA UI.  Merge each section into the corresponding part of your
-# configuration.yaml.
+# Prints fold-over adhesive luggage tags using only the escpos_printer
+# integration's built-in services (print_text_utf8, print_qr, feed).
+# No external scripts or images required.
+#
+# Physical layout of the printed strip:
+#
+#   [Back face]            ← printed first; upside-down when folded
+#   [  handle gap  ]       ← blank space that wraps around the handle
+#   [- FOLD HERE  -]
+#   [  small gap   ]
+#   [Front face]           ← printed last; right-side-up, primary side
+#   [cut]
 #
 # Prerequisites:
-#   1.  Copy generate_tag.py to /config/scripts/generate_tag.py
-#   2.  Add the input helpers from input_helpers.yaml
-#   3.  Merge the shell_command and script blocks below
-#   4.  Restart Home Assistant (or reload shell commands + scripts)
+#   1. Add the input helpers from input_helpers.yaml to your HA config
+#   2. Merge the script blocks below into your scripts.yaml
+#   3. Replace YOUR_DEVICE_ID with your printer's device ID
+#   4. Restart Home Assistant (or reload scripts)
 #
-# The print step targets all configured escpos_printer devices.
-# To target a specific printer, add a `target: { device_id: <id> }` key
-# to the escpos_printer.print_image service call.
+# Three designs are included:
+#   classic  — Airline-style with borders and QR vCard
+#   bold     — Huge text for maximum visibility at a distance
+#   contact  — Structured field layout with prominent QR vCard
 
-# ------------------------------------------------------------------
-# Shell Commands
-# ------------------------------------------------------------------
-# Merge into configuration.yaml under `shell_command:`
-#
-# shell_command:
-#   generate_luggage_tag: >-
-#     python3 /config/scripts/generate_tag.py
-#     --name "{{ states('input_text.luggage_passenger_name') }}"
-#     --destination "{{ states('input_text.luggage_destination') }}"
-#     --origin "{{ states('input_text.luggage_origin') }}"
-#     --flight "{{ states('input_text.luggage_flight_number') }}"
-#     --date "{{ states('input_text.luggage_travel_date') }}"
-#     --phone "{{ states('input_text.luggage_phone') }}"
-#     --email "{{ states('input_text.luggage_email') }}"
-#     --design "{{ states('input_select.luggage_tag_design') }}"
-#     --output /config/www/luggage_tag.png
-
-shell_command:
-  generate_luggage_tag: >-
-    python3 /config/scripts/generate_tag.py
-    --name "{{ states('input_text.luggage_passenger_name') }}"
-    --destination "{{ states('input_text.luggage_destination') }}"
-    --origin "{{ states('input_text.luggage_origin') }}"
-    --flight "{{ states('input_text.luggage_flight_number') }}"
-    --date "{{ states('input_text.luggage_travel_date') }}"
-    --phone "{{ states('input_text.luggage_phone') }}"
-    --email "{{ states('input_text.luggage_email') }}"
-    --design "{{ states('input_select.luggage_tag_design') }}"
-    --output /config/www/luggage_tag.png
-
-# ------------------------------------------------------------------
-# Scripts
-# ------------------------------------------------------------------
-# Merge into configuration.yaml under `script:` (or scripts.yaml).
+# =====================================================================
+# Jinja2 shorthand variables used throughout (defined in each script
+# via the "variables:" key so templates stay readable).
+# =====================================================================
 
 script:
-  # ----------------------------------------------------------------
-  # Main entry point — generate image, then print it
-  # ----------------------------------------------------------------
+  # =================================================================
+  # Master dispatcher — picks the design from input_select
+  # =================================================================
   print_luggage_tag:
     alias: Print Luggage Tag
     icon: mdi:bag-suitcase
     description: >-
-      Generate a fold-over luggage tag from the input helpers and
-      send it to the thermal printer.
+      Print a fold-over luggage tag using the design selected in
+      input_select.luggage_tag_design.
     sequence:
-      # Step 1 — render the tag image
-      - service: shell_command.generate_luggage_tag
-        data: {}
+      - choose:
+          - conditions:
+              - condition: state
+                entity_id: input_select.luggage_tag_design
+                state: bold
+            sequence:
+              - service: script.print_luggage_tag_bold
+          - conditions:
+              - condition: state
+                entity_id: input_select.luggage_tag_design
+                state: contact
+            sequence:
+              - service: script.print_luggage_tag_contact
+        default:
+          - service: script.print_luggage_tag_classic
 
-      # Short pause to ensure the file is flushed to disk
-      - delay:
-          seconds: 1
-
-      # Step 2 — print the generated image
-      - service: escpos_printer.print_image
-        data:
-          image: /config/www/luggage_tag.png
-          high_density: true
-          align: center
-          cut: partial
-          feed: 3
-
-  # ----------------------------------------------------------------
-  # Convenience shortcuts for each design
-  # ----------------------------------------------------------------
+  # =================================================================
+  # DESIGN 1 — Classic Airline
+  # =================================================================
+  #
+  # ================================================
+  #                L A X
+  # ================================================
+  #            JFK  -->  LAX
+  #
+  #          JOHN Q. SMITH
+  #
+  #      UA 1234  |  28 FEB 2026
+  #        +1 (555) 123-4567
+  #        john@example.com
+  #
+  #             [QR vCard]
+  #
+  # ================================================
+  #
   print_luggage_tag_classic:
     alias: Print Luggage Tag (Classic)
     icon: mdi:bag-suitcase
-    description: Force the Classic Airline design regardless of the input_select.
+    variables:
+      dest: "{{ states('input_text.luggage_destination') | upper | trim }}"
+      origin: "{{ states('input_text.luggage_origin') | upper | trim }}"
+      name: "{{ states('input_text.luggage_passenger_name') | upper | trim }}"
+      flight: "{{ states('input_text.luggage_flight_number') | upper | trim }}"
+      date: "{{ states('input_text.luggage_travel_date') | upper | trim }}"
+      phone: "{{ states('input_text.luggage_phone') | trim }}"
+      email: "{{ states('input_text.luggage_email') | trim }}"
+      device: YOUR_DEVICE_ID
     sequence:
-      - service: input_select.select_option
+      # --- BACK FACE (simple identifier) ---
+      - service: escpos_printer.print_text_utf8
         target:
-          entity_id: input_select.luggage_tag_design
+          device_id: "{{ device }}"
         data:
-          option: classic
-      - service: script.print_luggage_tag
+          text: "================================================"
+          align: center
+          bold: true
+          cut: none
 
+      - service: escpos_printer.print_text_utf8
+        target:
+          device_id: "{{ device }}"
+        data:
+          text: "{{ dest }}"
+          align: center
+          bold: true
+          width: triple
+          height: double
+          cut: none
+
+      - service: escpos_printer.print_text_utf8
+        target:
+          device_id: "{{ device }}"
+        data:
+          text: >-
+            ================================================
+
+            {{ name }}
+            {% if phone | length > 0 %}{{ phone }}{% endif %}
+
+            IF FOUND PLEASE CALL ABOVE
+          align: center
+          bold: true
+          cut: none
+
+      # --- HANDLE GAP + FOLD LINE ---
+      - service: escpos_printer.feed
+        target:
+          device_id: "{{ device }}"
+        data:
+          lines: 30
+
+      - service: escpos_printer.print_text_utf8
+        target:
+          device_id: "{{ device }}"
+        data:
+          text: "- - - - FOLD OVER HANDLE - - - -"
+          align: center
+          cut: none
+
+      - service: escpos_printer.feed
+        target:
+          device_id: "{{ device }}"
+        data:
+          lines: 4
+
+      # --- FRONT FACE (full details) ---
+      - service: escpos_printer.print_text_utf8
+        target:
+          device_id: "{{ device }}"
+        data:
+          text: "================================================"
+          align: center
+          bold: true
+          cut: none
+
+      - service: escpos_printer.print_text_utf8
+        target:
+          device_id: "{{ device }}"
+        data:
+          text: "{{ dest }}"
+          align: center
+          bold: true
+          width: triple
+          height: double
+          cut: none
+
+      - service: escpos_printer.print_text_utf8
+        target:
+          device_id: "{{ device }}"
+        data:
+          text: >-
+            ================================================
+            {% if origin | length > 0 %}{{ origin }}  -->  {{ dest }}{% endif %}
+          align: center
+          bold: true
+          cut: none
+
+      - service: escpos_printer.print_text_utf8
+        target:
+          device_id: "{{ device }}"
+        data:
+          text: "{{ name }}"
+          align: center
+          bold: true
+          width: double
+          height: double
+          cut: none
+
+      - service: escpos_printer.print_text_utf8
+        target:
+          device_id: "{{ device }}"
+        data:
+          text: >-
+            {% if flight | length > 0 or date | length > 0 %}
+            {% set parts = [] %}
+            {% if flight | length > 0 %}{% set _ = parts.append(flight) %}{% endif %}
+            {% if date | length > 0 %}{% set _ = parts.append(date) %}{% endif %}
+            {{ parts | join('  |  ') }}
+            {% endif %}
+            {% if phone | length > 0 %}
+            {{ phone }}
+            {% endif %}
+            {% if email | length > 0 %}
+            {{ email }}
+            {% endif %}
+          align: center
+          cut: none
+
+      - service: escpos_printer.print_qr
+        target:
+          device_id: "{{ device }}"
+        data:
+          data: >-
+            BEGIN:VCARD
+            VERSION:3.0
+            FN:{{ name }}
+            {% if phone | length > 0 %}TEL;TYPE=CELL:{{ phone }}{% endif %}
+            {% if email | length > 0 %}EMAIL:{{ email }}{% endif %}
+            END:VCARD
+          size: 6
+          align: center
+          cut: none
+
+      - service: escpos_printer.print_text_utf8
+        target:
+          device_id: "{{ device }}"
+        data:
+          text: "================================================"
+          align: center
+          bold: true
+          cut: partial
+          feed: 3
+
+  # =================================================================
+  # DESIGN 2 — Bold & Visible
+  # =================================================================
+  #
+  # ******* LUGGAGE TAG *******
+  #
+  #            L A X
+  #
+  #        JOHN Q. SMITH
+  #
+  #      +1 (555) 123-4567
+  #     UA 1234 | 28 FEB 2026
+  #
+  # ******* LUGGAGE TAG *******
+  #
   print_luggage_tag_bold:
     alias: Print Luggage Tag (Bold)
     icon: mdi:bag-suitcase
-    description: Force the Bold & Visible design regardless of the input_select.
+    variables:
+      dest: "{{ states('input_text.luggage_destination') | upper | trim }}"
+      name: "{{ states('input_text.luggage_passenger_name') | upper | trim }}"
+      flight: "{{ states('input_text.luggage_flight_number') | upper | trim }}"
+      date: "{{ states('input_text.luggage_travel_date') | upper | trim }}"
+      phone: "{{ states('input_text.luggage_phone') | trim }}"
+      device: YOUR_DEVICE_ID
     sequence:
-      - service: input_select.select_option
+      # --- BACK FACE ---
+      - service: escpos_printer.print_text_utf8
         target:
-          entity_id: input_select.luggage_tag_design
+          device_id: "{{ device }}"
         data:
-          option: bold
-      - service: script.print_luggage_tag
+          text: "{{ dest }}"
+          align: center
+          bold: true
+          width: "4"
+          height: "4"
+          cut: none
 
+      - service: escpos_printer.print_text_utf8
+        target:
+          device_id: "{{ device }}"
+        data:
+          text: "{{ name }}"
+          align: center
+          bold: true
+          width: double
+          height: double
+          cut: none
+
+      - service: escpos_printer.print_text_utf8
+        target:
+          device_id: "{{ device }}"
+        data:
+          text: >-
+            {% if phone | length > 0 %}{{ phone }}{% endif %}
+
+            IF FOUND CALL ABOVE
+          align: center
+          bold: true
+          cut: none
+
+      # --- HANDLE GAP + FOLD LINE ---
+      - service: escpos_printer.feed
+        target:
+          device_id: "{{ device }}"
+        data:
+          lines: 30
+
+      - service: escpos_printer.print_text_utf8
+        target:
+          device_id: "{{ device }}"
+        data:
+          text: "- - - - FOLD OVER HANDLE - - - -"
+          align: center
+          cut: none
+
+      - service: escpos_printer.feed
+        target:
+          device_id: "{{ device }}"
+        data:
+          lines: 4
+
+      # --- FRONT FACE ---
+      - service: escpos_printer.print_text_utf8
+        target:
+          device_id: "{{ device }}"
+        data:
+          text: "******* LUGGAGE TAG *******"
+          align: center
+          bold: true
+          cut: none
+          feed: 1
+
+      - service: escpos_printer.print_text_utf8
+        target:
+          device_id: "{{ device }}"
+        data:
+          text: "{{ dest }}"
+          align: center
+          bold: true
+          width: "4"
+          height: "4"
+          cut: none
+
+      - service: escpos_printer.print_text_utf8
+        target:
+          device_id: "{{ device }}"
+        data:
+          text: "{{ name }}"
+          align: center
+          bold: true
+          width: double
+          height: double
+          cut: none
+          feed: 1
+
+      - service: escpos_printer.print_text_utf8
+        target:
+          device_id: "{{ device }}"
+        data:
+          text: >-
+            {% if phone | length > 0 %}{{ phone }}{% endif %}
+            {% if flight | length > 0 or date | length > 0 %}
+            {% set parts = [] %}
+            {% if flight | length > 0 %}{% set _ = parts.append(flight) %}{% endif %}
+            {% if date | length > 0 %}{% set _ = parts.append(date) %}{% endif %}
+            {{ parts | join(' | ') }}
+            {% endif %}
+          align: center
+          bold: true
+          width: double
+          cut: none
+
+      - service: escpos_printer.print_text_utf8
+        target:
+          device_id: "{{ device }}"
+        data:
+          text: "******* LUGGAGE TAG *******"
+          align: center
+          bold: true
+          cut: partial
+          feed: 3
+
+  # =================================================================
+  # DESIGN 3 — Contact Card
+  # =================================================================
+  #
+  # ------------------------------------------------
+  #  DEST     LAX
+  #  FROM     JFK
+  #  FLIGHT   UA 1234
+  #  DATE     28 FEB 2026
+  # ------------------------------------------------
+  #  NAME     JOHN Q. SMITH
+  #  PHONE    +1 (555) 123-4567
+  #  EMAIL    john@example.com
+  # ------------------------------------------------
+  #
+  #             [QR vCard]
+  #
+  #        Scan for contact info
+  # ------------------------------------------------
+  #
   print_luggage_tag_contact:
     alias: Print Luggage Tag (Contact)
     icon: mdi:bag-suitcase
-    description: Force the Contact Card design regardless of the input_select.
+    variables:
+      dest: "{{ states('input_text.luggage_destination') | upper | trim }}"
+      origin: "{{ states('input_text.luggage_origin') | upper | trim }}"
+      name: "{{ states('input_text.luggage_passenger_name') | upper | trim }}"
+      flight: "{{ states('input_text.luggage_flight_number') | upper | trim }}"
+      date: "{{ states('input_text.luggage_travel_date') | upper | trim }}"
+      phone: "{{ states('input_text.luggage_phone') | trim }}"
+      email: "{{ states('input_text.luggage_email') | trim }}"
+      device: YOUR_DEVICE_ID
     sequence:
-      - service: input_select.select_option
+      # --- BACK FACE ---
+      - service: escpos_printer.print_text_utf8
         target:
-          entity_id: input_select.luggage_tag_design
+          device_id: "{{ device }}"
         data:
-          option: contact
-      - service: script.print_luggage_tag
+          text: >-
+            ------------------------------------------------
+            DEST     {{ dest }}
+            NAME     {{ name }}
+            {% if phone | length > 0 %}PHONE    {{ phone }}{% endif %}
+            ------------------------------------------------
 
-# ------------------------------------------------------------------
-# Automation — print a tag when all required fields are filled
-# ------------------------------------------------------------------
-# Optional: uncomment and merge into automations.yaml to auto-print
-# whenever the passenger name or destination changes (and both are set).
-#
-# automation:
-#   - alias: Auto Print Luggage Tag
-#     description: >-
-#       Automatically generate and print a luggage tag whenever the
-#       passenger name or destination input is updated, as long as
-#       both fields are non-empty.
-#     trigger:
-#       - platform: state
-#         entity_id:
-#           - input_text.luggage_passenger_name
-#           - input_text.luggage_destination
-#     condition:
-#       - condition: template
-#         value_template: >-
-#           {{ states('input_text.luggage_passenger_name') | length > 0
-#              and states('input_text.luggage_destination') | length > 0 }}
-#     action:
-#       - service: script.print_luggage_tag
+            IF FOUND PLEASE CONTACT
+            OWNER USING DETAILS ABOVE
+          align: left
+          cut: none
+
+      # --- HANDLE GAP + FOLD LINE ---
+      - service: escpos_printer.feed
+        target:
+          device_id: "{{ device }}"
+        data:
+          lines: 30
+
+      - service: escpos_printer.print_text_utf8
+        target:
+          device_id: "{{ device }}"
+        data:
+          text: "- - - - FOLD OVER HANDLE - - - -"
+          align: center
+          cut: none
+
+      - service: escpos_printer.feed
+        target:
+          device_id: "{{ device }}"
+        data:
+          lines: 4
+
+      # --- FRONT FACE ---
+      - service: escpos_printer.print_text_utf8
+        target:
+          device_id: "{{ device }}"
+        data:
+          text: >-
+            ------------------------------------------------
+            {% if dest | length > 0 %}DEST     {{ dest }}{% endif %}
+            {% if origin | length > 0 %}FROM     {{ origin }}{% endif %}
+            {% if flight | length > 0 %}FLIGHT   {{ flight }}{% endif %}
+            {% if date | length > 0 %}DATE     {{ date }}{% endif %}
+            ------------------------------------------------
+          align: left
+          cut: none
+
+      - service: escpos_printer.print_text_utf8
+        target:
+          device_id: "{{ device }}"
+        data:
+          text: "{{ name }}"
+          align: left
+          bold: true
+          width: double
+          cut: none
+
+      - service: escpos_printer.print_text_utf8
+        target:
+          device_id: "{{ device }}"
+        data:
+          text: >-
+            {% if phone | length > 0 %}PHONE    {{ phone }}{% endif %}
+            {% if email | length > 0 %}EMAIL    {{ email }}{% endif %}
+            ------------------------------------------------
+          align: left
+          cut: none
+
+      - service: escpos_printer.print_qr
+        target:
+          device_id: "{{ device }}"
+        data:
+          data: >-
+            BEGIN:VCARD
+            VERSION:3.0
+            FN:{{ name }}
+            {% if phone | length > 0 %}TEL;TYPE=CELL:{{ phone }}{% endif %}
+            {% if email | length > 0 %}EMAIL:{{ email }}{% endif %}
+            END:VCARD
+          size: 8
+          align: center
+          cut: none
+
+      - service: escpos_printer.print_text_utf8
+        target:
+          device_id: "{{ device }}"
+        data:
+          text: >-
+            Scan for contact info
+            ------------------------------------------------
+          align: center
+          cut: partial
+          feed: 3
