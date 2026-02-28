@@ -19,15 +19,11 @@
 #   3. Replace YOUR_DEVICE_ID with your printer's device ID
 #   4. Restart Home Assistant (or reload scripts)
 #
-# Three designs are included:
-#   classic  — Airline-style with borders and QR vCard
-#   bold     — Huge text for maximum visibility at a distance
-#   contact  — Structured field layout with prominent QR vCard
-
-# =====================================================================
-# Jinja2 shorthand variables used throughout (defined in each script
-# via the "variables:" key so templates stay readable).
-# =====================================================================
+# Notes:
+#   - Separators are 32 chars wide (safe for 58mm and 80mm printers)
+#   - 1-second delays between print commands buffer the CUPS queue
+#   - Each print_text_utf8 call includes feed for newline spacing
+#   - Optional fields are skipped entirely when blank
 
 script:
   # =================================================================
@@ -60,20 +56,20 @@ script:
   # DESIGN 1 — Classic Airline
   # =================================================================
   #
-  # ================================================
-  #                L A X
-  # ================================================
-  #            JFK  -->  LAX
+  #  ================================
+  #            L A X
+  #  ================================
+  #        JFK  -->  LAX
   #
-  #          JOHN Q. SMITH
+  #       JOHN Q. SMITH
   #
-  #      UA 1234  |  28 FEB 2026
-  #        +1 (555) 123-4567
-  #        john@example.com
+  #   UA 1234  |  28 FEB 2026
+  #     +1 (555) 123-4567
+  #     john@example.com
   #
-  #             [QR vCard]
+  #          [QR vCard]
   #
-  # ================================================
+  #  ================================
   #
   print_luggage_tag_classic:
     alias: Print Luggage Tag (Classic)
@@ -89,14 +85,19 @@ script:
       device: YOUR_DEVICE_ID
     sequence:
       # --- BACK FACE (simple identifier) ---
+
       - service: escpos_printer.print_text_utf8
         target:
           device_id: "{{ device }}"
         data:
-          text: "================================================"
+          text: "================================"
           align: center
           bold: true
           cut: none
+          feed: 1
+
+      - delay:
+          seconds: 1
 
       - service: escpos_printer.print_text_utf8
         target:
@@ -108,36 +109,87 @@ script:
           width: triple
           height: double
           cut: none
+          feed: 1
+
+      - delay:
+          seconds: 1
 
       - service: escpos_printer.print_text_utf8
         target:
           device_id: "{{ device }}"
         data:
-          text: >-
-            ================================================
-
-            {{ name }}
-            {% if phone | length > 0 %}{{ phone }}{% endif %}
-
-            IF FOUND PLEASE CALL ABOVE
+          text: "================================"
           align: center
           bold: true
           cut: none
+          feed: 1
+
+      - delay:
+          seconds: 1
+
+      - service: escpos_printer.print_text_utf8
+        target:
+          device_id: "{{ device }}"
+        data:
+          text: "{{ name }}"
+          align: center
+          bold: true
+          cut: none
+          feed: 1
+
+      - delay:
+          seconds: 1
+
+      - if:
+          - condition: template
+            value_template: "{{ phone | length > 0 }}"
+        then:
+          - service: escpos_printer.print_text_utf8
+            target:
+              device_id: "{{ device }}"
+            data:
+              text: "{{ phone }}"
+              align: center
+              cut: none
+              feed: 1
+          - delay:
+              seconds: 1
+
+      - service: escpos_printer.print_text_utf8
+        target:
+          device_id: "{{ device }}"
+        data:
+          text: "IF FOUND PLEASE CALL ABOVE"
+          align: center
+          bold: true
+          cut: none
+          feed: 2
+
+      - delay:
+          seconds: 1
 
       # --- HANDLE GAP + FOLD LINE ---
+
       - service: escpos_printer.feed
         target:
           device_id: "{{ device }}"
         data:
           lines: 30
 
+      - delay:
+          seconds: 1
+
       - service: escpos_printer.print_text_utf8
         target:
           device_id: "{{ device }}"
         data:
-          text: "- - - - FOLD OVER HANDLE - - - -"
+          text: "-- FOLD OVER HANDLE --"
           align: center
           cut: none
+          feed: 1
+
+      - delay:
+          seconds: 1
 
       - service: escpos_printer.feed
         target:
@@ -145,15 +197,23 @@ script:
         data:
           lines: 4
 
+      - delay:
+          seconds: 1
+
       # --- FRONT FACE (full details) ---
+
       - service: escpos_printer.print_text_utf8
         target:
           device_id: "{{ device }}"
         data:
-          text: "================================================"
+          text: "================================"
           align: center
           bold: true
           cut: none
+          feed: 1
+
+      - delay:
+          seconds: 1
 
       - service: escpos_printer.print_text_utf8
         target:
@@ -165,17 +225,38 @@ script:
           width: triple
           height: double
           cut: none
+          feed: 1
+
+      - delay:
+          seconds: 1
 
       - service: escpos_printer.print_text_utf8
         target:
           device_id: "{{ device }}"
         data:
-          text: >-
-            ================================================
-            {% if origin | length > 0 %}{{ origin }}  -->  {{ dest }}{% endif %}
+          text: "================================"
           align: center
           bold: true
           cut: none
+          feed: 1
+
+      - delay:
+          seconds: 1
+
+      - if:
+          - condition: template
+            value_template: "{{ origin | length > 0 }}"
+        then:
+          - service: escpos_printer.print_text_utf8
+            target:
+              device_id: "{{ device }}"
+            data:
+              text: "{{ origin }}  -->  {{ dest }}"
+              align: center
+              cut: none
+              feed: 1
+          - delay:
+              seconds: 1
 
       - service: escpos_printer.print_text_utf8
         target:
@@ -187,47 +268,84 @@ script:
           width: double
           height: double
           cut: none
+          feed: 1
 
-      - service: escpos_printer.print_text_utf8
-        target:
-          device_id: "{{ device }}"
-        data:
-          text: >-
-            {% if flight | length > 0 or date | length > 0 %}
-            {% set parts = [] %}
-            {% if flight | length > 0 %}{% set _ = parts.append(flight) %}{% endif %}
-            {% if date | length > 0 %}{% set _ = parts.append(date) %}{% endif %}
-            {{ parts | join('  |  ') }}
-            {% endif %}
-            {% if phone | length > 0 %}
-            {{ phone }}
-            {% endif %}
-            {% if email | length > 0 %}
-            {{ email }}
-            {% endif %}
-          align: center
-          cut: none
+      - delay:
+          seconds: 1
+
+      - if:
+          - condition: template
+            value_template: "{{ flight | length > 0 or date | length > 0 }}"
+        then:
+          - service: escpos_printer.print_text_utf8
+            target:
+              device_id: "{{ device }}"
+            data:
+              text: >-
+                {% if flight | length > 0 and date | length > 0 %}{{ flight }}  |  {{ date }}{% elif flight | length > 0 %}{{ flight }}{% else %}{{ date }}{% endif %}
+              align: center
+              cut: none
+              feed: 1
+          - delay:
+              seconds: 1
+
+      - if:
+          - condition: template
+            value_template: "{{ phone | length > 0 }}"
+        then:
+          - service: escpos_printer.print_text_utf8
+            target:
+              device_id: "{{ device }}"
+            data:
+              text: "{{ phone }}"
+              align: center
+              cut: none
+              feed: 1
+          - delay:
+              seconds: 1
+
+      - if:
+          - condition: template
+            value_template: "{{ email | length > 0 }}"
+        then:
+          - service: escpos_printer.print_text_utf8
+            target:
+              device_id: "{{ device }}"
+            data:
+              text: "{{ email }}"
+              align: center
+              cut: none
+              feed: 1
+          - delay:
+              seconds: 1
 
       - service: escpos_printer.print_qr
         target:
           device_id: "{{ device }}"
         data:
-          data: >-
+          data: |
             BEGIN:VCARD
             VERSION:3.0
             FN:{{ name }}
-            {% if phone | length > 0 %}TEL;TYPE=CELL:{{ phone }}{% endif %}
-            {% if email | length > 0 %}EMAIL:{{ email }}{% endif %}
+            {%- if phone | length > 0 %}
+            TEL;TYPE=CELL:{{ phone }}
+            {%- endif %}
+            {%- if email | length > 0 %}
+            EMAIL:{{ email }}
+            {%- endif %}
             END:VCARD
           size: 6
           align: center
           cut: none
 
+      - delay:
+          seconds: 1
+
       - service: escpos_printer.print_text_utf8
         target:
           device_id: "{{ device }}"
         data:
-          text: "================================================"
+          text: "================================"
           align: center
           bold: true
           cut: partial
@@ -237,16 +355,16 @@ script:
   # DESIGN 2 — Bold & Visible
   # =================================================================
   #
-  # ******* LUGGAGE TAG *******
+  #  ****** LUGGAGE TAG ******
   #
-  #            L A X
+  #           L A X
   #
-  #        JOHN Q. SMITH
+  #       JOHN Q. SMITH
   #
-  #      +1 (555) 123-4567
-  #     UA 1234 | 28 FEB 2026
+  #     +1 (555) 123-4567
+  #    UA 1234 | 28 FEB 2026
   #
-  # ******* LUGGAGE TAG *******
+  #  ****** LUGGAGE TAG ******
   #
   print_luggage_tag_bold:
     alias: Print Luggage Tag (Bold)
@@ -260,6 +378,7 @@ script:
       device: YOUR_DEVICE_ID
     sequence:
       # --- BACK FACE ---
+
       - service: escpos_printer.print_text_utf8
         target:
           device_id: "{{ device }}"
@@ -270,6 +389,10 @@ script:
           width: "4"
           height: "4"
           cut: none
+          feed: 1
+
+      - delay:
+          seconds: 1
 
       - service: escpos_printer.print_text_utf8
         target:
@@ -281,33 +404,62 @@ script:
           width: double
           height: double
           cut: none
+          feed: 1
+
+      - delay:
+          seconds: 1
+
+      - if:
+          - condition: template
+            value_template: "{{ phone | length > 0 }}"
+        then:
+          - service: escpos_printer.print_text_utf8
+            target:
+              device_id: "{{ device }}"
+            data:
+              text: "{{ phone }}"
+              align: center
+              bold: true
+              cut: none
+              feed: 1
+          - delay:
+              seconds: 1
 
       - service: escpos_printer.print_text_utf8
         target:
           device_id: "{{ device }}"
         data:
-          text: >-
-            {% if phone | length > 0 %}{{ phone }}{% endif %}
-
-            IF FOUND CALL ABOVE
+          text: "IF FOUND CALL ABOVE"
           align: center
           bold: true
           cut: none
+          feed: 2
+
+      - delay:
+          seconds: 1
 
       # --- HANDLE GAP + FOLD LINE ---
+
       - service: escpos_printer.feed
         target:
           device_id: "{{ device }}"
         data:
           lines: 30
 
+      - delay:
+          seconds: 1
+
       - service: escpos_printer.print_text_utf8
         target:
           device_id: "{{ device }}"
         data:
-          text: "- - - - FOLD OVER HANDLE - - - -"
+          text: "-- FOLD OVER HANDLE --"
           align: center
           cut: none
+          feed: 1
+
+      - delay:
+          seconds: 1
 
       - service: escpos_printer.feed
         target:
@@ -315,16 +467,23 @@ script:
         data:
           lines: 4
 
+      - delay:
+          seconds: 1
+
       # --- FRONT FACE ---
+
       - service: escpos_printer.print_text_utf8
         target:
           device_id: "{{ device }}"
         data:
-          text: "******* LUGGAGE TAG *******"
+          text: "****** LUGGAGE TAG ******"
           align: center
           bold: true
           cut: none
-          feed: 1
+          feed: 2
+
+      - delay:
+          seconds: 1
 
       - service: escpos_printer.print_text_utf8
         target:
@@ -336,6 +495,10 @@ script:
           width: "4"
           height: "4"
           cut: none
+          feed: 1
+
+      - delay:
+          seconds: 1
 
       - service: escpos_printer.print_text_utf8
         target:
@@ -349,28 +512,47 @@ script:
           cut: none
           feed: 1
 
-      - service: escpos_printer.print_text_utf8
-        target:
-          device_id: "{{ device }}"
-        data:
-          text: >-
-            {% if phone | length > 0 %}{{ phone }}{% endif %}
-            {% if flight | length > 0 or date | length > 0 %}
-            {% set parts = [] %}
-            {% if flight | length > 0 %}{% set _ = parts.append(flight) %}{% endif %}
-            {% if date | length > 0 %}{% set _ = parts.append(date) %}{% endif %}
-            {{ parts | join(' | ') }}
-            {% endif %}
-          align: center
-          bold: true
-          width: double
-          cut: none
+      - delay:
+          seconds: 1
+
+      - if:
+          - condition: template
+            value_template: "{{ phone | length > 0 }}"
+        then:
+          - service: escpos_printer.print_text_utf8
+            target:
+              device_id: "{{ device }}"
+            data:
+              text: "{{ phone }}"
+              align: center
+              bold: true
+              width: double
+              cut: none
+              feed: 1
+          - delay:
+              seconds: 1
+
+      - if:
+          - condition: template
+            value_template: "{{ flight | length > 0 or date | length > 0 }}"
+        then:
+          - service: escpos_printer.print_text_utf8
+            target:
+              device_id: "{{ device }}"
+            data:
+              text: >-
+                {% if flight | length > 0 and date | length > 0 %}{{ flight }}  |  {{ date }}{% elif flight | length > 0 %}{{ flight }}{% else %}{{ date }}{% endif %}
+              align: center
+              cut: none
+              feed: 1
+          - delay:
+              seconds: 1
 
       - service: escpos_printer.print_text_utf8
         target:
           device_id: "{{ device }}"
         data:
-          text: "******* LUGGAGE TAG *******"
+          text: "****** LUGGAGE TAG ******"
           align: center
           bold: true
           cut: partial
@@ -380,21 +562,21 @@ script:
   # DESIGN 3 — Contact Card
   # =================================================================
   #
-  # ------------------------------------------------
-  #  DEST     LAX
-  #  FROM     JFK
-  #  FLIGHT   UA 1234
-  #  DATE     28 FEB 2026
-  # ------------------------------------------------
-  #  NAME     JOHN Q. SMITH
-  #  PHONE    +1 (555) 123-4567
-  #  EMAIL    john@example.com
-  # ------------------------------------------------
+  #  ================================
+  #  DEST:    LAX
+  #  FROM:    JFK
+  #  FLIGHT:  UA 1234
+  #  DATE:    28 FEB 2026
+  #  ================================
+  #  NAME:    JOHN Q. SMITH
+  #  PHONE:   +1 (555) 123-4567
+  #  EMAIL:   john@example.com
+  #  ================================
   #
-  #             [QR vCard]
+  #           [QR vCard]
   #
-  #        Scan for contact info
-  # ------------------------------------------------
+  #      Scan for contact info
+  #  ================================
   #
   print_luggage_tag_contact:
     alias: Print Luggage Tag (Contact)
@@ -410,36 +592,119 @@ script:
       device: YOUR_DEVICE_ID
     sequence:
       # --- BACK FACE ---
+
       - service: escpos_printer.print_text_utf8
         target:
           device_id: "{{ device }}"
         data:
-          text: >-
-            ------------------------------------------------
-            DEST     {{ dest }}
-            NAME     {{ name }}
-            {% if phone | length > 0 %}PHONE    {{ phone }}{% endif %}
-            ------------------------------------------------
-
-            IF FOUND PLEASE CONTACT
-            OWNER USING DETAILS ABOVE
+          text: "================================"
           align: left
           cut: none
+          feed: 1
+
+      - delay:
+          seconds: 1
+
+      - service: escpos_printer.print_text_utf8
+        target:
+          device_id: "{{ device }}"
+        data:
+          text: "DEST:  {{ dest }}"
+          align: left
+          cut: none
+          feed: 1
+
+      - delay:
+          seconds: 1
+
+      - service: escpos_printer.print_text_utf8
+        target:
+          device_id: "{{ device }}"
+        data:
+          text: "NAME:  {{ name }}"
+          align: left
+          bold: true
+          cut: none
+          feed: 1
+
+      - delay:
+          seconds: 1
+
+      - if:
+          - condition: template
+            value_template: "{{ phone | length > 0 }}"
+        then:
+          - service: escpos_printer.print_text_utf8
+            target:
+              device_id: "{{ device }}"
+            data:
+              text: "PHONE: {{ phone }}"
+              align: left
+              cut: none
+              feed: 1
+          - delay:
+              seconds: 1
+
+      - service: escpos_printer.print_text_utf8
+        target:
+          device_id: "{{ device }}"
+        data:
+          text: "================================"
+          align: left
+          cut: none
+          feed: 1
+
+      - delay:
+          seconds: 1
+
+      - service: escpos_printer.print_text_utf8
+        target:
+          device_id: "{{ device }}"
+        data:
+          text: "IF FOUND PLEASE CONTACT"
+          align: center
+          bold: true
+          cut: none
+          feed: 1
+
+      - delay:
+          seconds: 1
+
+      - service: escpos_printer.print_text_utf8
+        target:
+          device_id: "{{ device }}"
+        data:
+          text: "OWNER USING DETAILS ABOVE"
+          align: center
+          bold: true
+          cut: none
+          feed: 2
+
+      - delay:
+          seconds: 1
 
       # --- HANDLE GAP + FOLD LINE ---
+
       - service: escpos_printer.feed
         target:
           device_id: "{{ device }}"
         data:
           lines: 30
 
+      - delay:
+          seconds: 1
+
       - service: escpos_printer.print_text_utf8
         target:
           device_id: "{{ device }}"
         data:
-          text: "- - - - FOLD OVER HANDLE - - - -"
+          text: "-- FOLD OVER HANDLE --"
           align: center
           cut: none
+          feed: 1
+
+      - delay:
+          seconds: 1
 
       - service: escpos_printer.feed
         target:
@@ -447,20 +712,91 @@ script:
         data:
           lines: 4
 
+      - delay:
+          seconds: 1
+
       # --- FRONT FACE ---
+
       - service: escpos_printer.print_text_utf8
         target:
           device_id: "{{ device }}"
         data:
-          text: >-
-            ------------------------------------------------
-            {% if dest | length > 0 %}DEST     {{ dest }}{% endif %}
-            {% if origin | length > 0 %}FROM     {{ origin }}{% endif %}
-            {% if flight | length > 0 %}FLIGHT   {{ flight }}{% endif %}
-            {% if date | length > 0 %}DATE     {{ date }}{% endif %}
-            ------------------------------------------------
+          text: "================================"
           align: left
           cut: none
+          feed: 1
+
+      - delay:
+          seconds: 1
+
+      - service: escpos_printer.print_text_utf8
+        target:
+          device_id: "{{ device }}"
+        data:
+          text: "DEST:  {{ dest }}"
+          align: left
+          cut: none
+          feed: 1
+
+      - delay:
+          seconds: 1
+
+      - if:
+          - condition: template
+            value_template: "{{ origin | length > 0 }}"
+        then:
+          - service: escpos_printer.print_text_utf8
+            target:
+              device_id: "{{ device }}"
+            data:
+              text: "FROM:  {{ origin }}"
+              align: left
+              cut: none
+              feed: 1
+          - delay:
+              seconds: 1
+
+      - if:
+          - condition: template
+            value_template: "{{ flight | length > 0 }}"
+        then:
+          - service: escpos_printer.print_text_utf8
+            target:
+              device_id: "{{ device }}"
+            data:
+              text: "FLIGHT: {{ flight }}"
+              align: left
+              cut: none
+              feed: 1
+          - delay:
+              seconds: 1
+
+      - if:
+          - condition: template
+            value_template: "{{ date | length > 0 }}"
+        then:
+          - service: escpos_printer.print_text_utf8
+            target:
+              device_id: "{{ device }}"
+            data:
+              text: "DATE:  {{ date }}"
+              align: left
+              cut: none
+              feed: 1
+          - delay:
+              seconds: 1
+
+      - service: escpos_printer.print_text_utf8
+        target:
+          device_id: "{{ device }}"
+        data:
+          text: "================================"
+          align: left
+          cut: none
+          feed: 1
+
+      - delay:
+          seconds: 1
 
       - service: escpos_printer.print_text_utf8
         target:
@@ -471,40 +807,92 @@ script:
           bold: true
           width: double
           cut: none
+          feed: 1
+
+      - delay:
+          seconds: 1
+
+      - if:
+          - condition: template
+            value_template: "{{ phone | length > 0 }}"
+        then:
+          - service: escpos_printer.print_text_utf8
+            target:
+              device_id: "{{ device }}"
+            data:
+              text: "PHONE: {{ phone }}"
+              align: left
+              cut: none
+              feed: 1
+          - delay:
+              seconds: 1
+
+      - if:
+          - condition: template
+            value_template: "{{ email | length > 0 }}"
+        then:
+          - service: escpos_printer.print_text_utf8
+            target:
+              device_id: "{{ device }}"
+            data:
+              text: "EMAIL: {{ email }}"
+              align: left
+              cut: none
+              feed: 1
+          - delay:
+              seconds: 1
 
       - service: escpos_printer.print_text_utf8
         target:
           device_id: "{{ device }}"
         data:
-          text: >-
-            {% if phone | length > 0 %}PHONE    {{ phone }}{% endif %}
-            {% if email | length > 0 %}EMAIL    {{ email }}{% endif %}
-            ------------------------------------------------
+          text: "================================"
           align: left
           cut: none
+          feed: 2
+
+      - delay:
+          seconds: 1
 
       - service: escpos_printer.print_qr
         target:
           device_id: "{{ device }}"
         data:
-          data: >-
+          data: |
             BEGIN:VCARD
             VERSION:3.0
             FN:{{ name }}
-            {% if phone | length > 0 %}TEL;TYPE=CELL:{{ phone }}{% endif %}
-            {% if email | length > 0 %}EMAIL:{{ email }}{% endif %}
+            {%- if phone | length > 0 %}
+            TEL;TYPE=CELL:{{ phone }}
+            {%- endif %}
+            {%- if email | length > 0 %}
+            EMAIL:{{ email }}
+            {%- endif %}
             END:VCARD
           size: 8
           align: center
           cut: none
 
+      - delay:
+          seconds: 1
+
       - service: escpos_printer.print_text_utf8
         target:
           device_id: "{{ device }}"
         data:
-          text: >-
-            Scan for contact info
-            ------------------------------------------------
+          text: "Scan for contact info"
+          align: center
+          cut: none
+          feed: 1
+
+      - delay:
+          seconds: 1
+
+      - service: escpos_printer.print_text_utf8
+        target:
+          device_id: "{{ device }}"
+        data:
+          text: "================================"
           align: center
           cut: partial
           feed: 3
