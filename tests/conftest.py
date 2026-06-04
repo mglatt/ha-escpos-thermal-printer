@@ -114,23 +114,30 @@ def fake_pyipp_module(request: Any) -> Generator[None, None, None]:
         def __init__(self, groups: list[Any]) -> None:
             self.groups = groups
 
+    class _FakeState:
+        def __init__(self) -> None:
+            self.printer_state = "idle"
+            self.reasons = "none"
+
+    class _FakePrinterInfo:
+        def __init__(self) -> None:
+            self.name = "TestPrinter"
+
     class _FakePrinter:
         def __init__(self) -> None:
-            self.state = _IppPrinterState.IDLE
-            self.state_reasons: list[str] = ["none"]
+            self.state = _FakeState()
+            self.info = _FakePrinterInfo()
 
-    class _FakePrintJob:
-        _counter = 0
-
+    class _FakeResponse:
         def __init__(self) -> None:
-            _FakePrintJob._counter += 1
-            self.id = _FakePrintJob._counter
+            self.jobs: dict[str, Any] = {"job-id": 1}
+            self.printers: list[Any] = []
 
-    class _FakeIppClient:
-        def __init__(self, *args: Any, **kwargs: Any) -> None:
-            pass
+    class _FakeIPP:
+        def __init__(self, uri: str, **kwargs: Any) -> None:
+            self._uri = uri
 
-        async def __aenter__(self) -> "_FakeIppClient":
+        async def __aenter__(self) -> "_FakeIPP":
             return self
 
         async def __aexit__(self, *args: Any) -> None:
@@ -139,19 +146,19 @@ def fake_pyipp_module(request: Any) -> Generator[None, None, None]:
         async def printer(self) -> _FakePrinter:
             return _FakePrinter()
 
-        async def print_job(self, document: bytes, **kwargs: Any) -> _FakePrintJob:
-            return _FakePrintJob()
-
         async def execute(self, operation: Any, request_data: Any) -> _FakeResponse:
+            resp = _FakeResponse()
             if operation == _IppOperation.CUPS_GET_PRINTERS:
-                group = _FakeGroup({"printer-name": _FakeAttribute("TestPrinter")})
-                return _FakeResponse([group])
-            return _FakeResponse([])
+                resp.printers = [_FakePrinter()]
+            return resp
+
+        async def raw(self, operation: Any, request_data: Any) -> bytes:
+            return b""
 
     pyipp_mod = types.ModuleType("pyipp")
     pyipp_enums_mod = types.ModuleType("pyipp.enums")
 
-    pyipp_mod.IppClient = _FakeIppClient  # type: ignore[attr-defined]
+    pyipp_mod.IPP = _FakeIPP  # type: ignore[attr-defined]
     pyipp_enums_mod.IppPrinterState = _IppPrinterState  # type: ignore[attr-defined]
     pyipp_enums_mod.IppOperation = _IppOperation  # type: ignore[attr-defined]
 

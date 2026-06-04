@@ -40,17 +40,20 @@ def _get_dummy_printer() -> type[Any]:
     return Dummy  # type: ignore[no-any-return]
 
 
-def _parse_cups_server(server: str | None) -> tuple[str, int]:
-    """Parse 'host' or 'host:port' into (host, port). Defaults to localhost:631."""
-    if not server:
-        return "localhost", 631
-    if ":" in server:
-        host, port_str = server.rsplit(":", 1)
-        try:
-            return host, int(port_str)
-        except ValueError:
-            pass
-    return server, 631
+def _build_printer_uri(printer_name: str, server: str | None = None) -> str:
+    """Build an IPP URI for a CUPS printer queue."""
+    host = server or "localhost"
+    if ":" not in host:
+        host = f"{host}:631"
+    return f"ipp://{host}/printers/{printer_name}"
+
+
+def _build_root_uri(server: str | None = None) -> str:
+    """Build an IPP URI for the CUPS server root."""
+    host = server or "localhost"
+    if ":" not in host:
+        host = f"{host}:631"
+    return f"ipp://{host}/"
 
 
 async def _submit_to_cups(printer_name: str, data: bytes, server: str | None = None) -> int:
@@ -62,20 +65,27 @@ async def _submit_to_cups(printer_name: str, data: bytes, server: str | None = N
         server: CUPS server address ('host' or 'host:port'). None means localhost.
 
     Returns:
-        IPP print job ID.
+        IPP job ID.
     """
-    from pyipp import IppClient  # noqa: PLC0415
+    from pyipp import IPP  # noqa: PLC0415
+    from pyipp.enums import IppOperation  # noqa: PLC0415
 
-    host, port = _parse_cups_server(server)
-    async with IppClient(host=host, port=port, base_path=f"/printers/{printer_name}") as client:
-        job = await client.print_job(
-            document=data,
-            document_name="ESC/POS Print Job",
-            # application/vnd.cups-raw bypasses CUPS filters and sends data as-is
-            document_format="application/vnd.cups-raw",
+    uri = _build_printer_uri(printer_name, server)
+    async with IPP(uri) as ipp:
+        response = await ipp.execute(
+            IppOperation.PRINT_JOB,
+            {
+                "operation-attributes-tag": {
+                    "requesting-user-name": "homeassistant",
+                    "job-name": "ESC/POS Print Job",
+                    "document-format": "application/vnd.cups-raw",
+                },
+                "data": data,
+            },
         )
-        _LOGGER.debug("Submitted IPP job %s to printer '%s'", job.id, printer_name)
-        return job.id
+    job_id = response.jobs.get("job-id", 0) if hasattr(response, "jobs") else 0
+    _LOGGER.debug("Submitted IPP job %s to printer '%s'", job_id, printer_name)
+    return job_id
 
 
 async def is_cups_available(server: str | None = None) -> bool:
@@ -88,12 +98,15 @@ async def is_cups_available(server: str | None = None) -> bool:
         True if the server responds to IPP requests.
     """
     try:
-        from pyipp import IppClient  # noqa: PLC0415
+        from pyipp import IPP  # noqa: PLC0415
         from pyipp.enums import IppOperation  # noqa: PLC0415
 
-        host, port = _parse_cups_server(server)
-        async with IppClient(host=host, port=port, base_path="/") as client:
-            await client.execute(IppOperation.CUPS_GET_PRINTERS, {"operation-attributes-tag": {}})
+        uri = _build_root_uri(server)
+        async with IPP(uri) as ipp:
+            await ipp.raw(
+                IppOperation.CUPS_GET_PRINTERS,
+                {"operation-attributes-tag": {}},
+            )
         return True
     except ImportError:
         _LOGGER.warning("pyipp library not available — CUPS printing disabled")
@@ -113,21 +126,21 @@ async def get_cups_printers(server: str | None = None) -> list[str]:
         List of CUPS printer queue names.
     """
     try:
-        from pyipp import IppClient  # noqa: PLC0415
+        from pyipp import IPP  # noqa: PLC0415
         from pyipp.enums import IppOperation  # noqa: PLC0415
 
-        host, port = _parse_cups_server(server)
-        async with IppClient(host=host, port=port, base_path="/") as client:
-            response = await client.execute(
+        uri = _build_root_uri(server)
+        async with IPP(uri) as ipp:
+            response = await ipp.execute(
                 IppOperation.CUPS_GET_PRINTERS,
                 {"operation-attributes-tag": {}},
             )
         printers: list[str] = []
-        for group in response.groups:
-            attrs = group.attributes
-            if "printer-name" in attrs:
-                name_attr = attrs["printer-name"]
-                printers.append(name_attr.value if hasattr(name_attr, "value") else str(name_attr))
+        if hasattr(response, "printers"):
+            for p in response.printers:
+                name = getattr(p, "name", None) or getattr(getattr(p, "info", None), "name", None)
+                if name:
+                    printers.append(name)
         return printers
     except ImportError:
         _LOGGER.warning("pyipp library not available")
@@ -148,11 +161,11 @@ async def is_cups_printer_available(printer_name: str, server: str | None = None
         True if the printer responds to Get-Printer-Attributes.
     """
     try:
-        from pyipp import IppClient  # noqa: PLC0415
+        from pyipp import IPP  # noqa: PLC0415
 
-        host, port = _parse_cups_server(server)
-        async with IppClient(host=host, port=port, base_path=f"/printers/{printer_name}") as client:
-            await client.printer()
+        uri = _build_printer_uri(printer_name, server)
+        async with IPP(uri) as ipp:
+            await ipp.printer()
         return True
     except ImportError:
         _LOGGER.warning("pyipp library not available")
@@ -173,17 +186,19 @@ async def get_cups_printer_status(printer_name: str, server: str | None = None) 
         Tuple of (printer_ok, error_message). error_message is None when ok.
     """
     try:
-        from pyipp import IppClient  # noqa: PLC0415
-        from pyipp.enums import IppPrinterState  # noqa: PLC0415
+        from pyipp import IPP  # noqa: PLC0415
 
-        host, port = _parse_cups_server(server)
-        async with IppClient(host=host, port=port, base_path=f"/printers/{printer_name}") as client:
-            printer = await client.printer()
+        uri = _build_printer_uri(printer_name, server)
+        async with IPP(uri) as ipp:
+            printer = await ipp.printer()
 
-        if printer.state == IppPrinterState.STOPPED:
-            reasons = getattr(printer, "state_reasons", None) or []
-            reason = reasons[0] if reasons else "Printer stopped"
-            return False, str(reason)
+        state = getattr(printer, "state", None)
+        if state:
+            printer_state = getattr(state, "printer_state", None)
+            reasons = getattr(state, "reasons", None)
+            if printer_state and "stopped" in str(printer_state).lower():
+                reason = reasons if reasons else "Printer stopped"
+                return False, str(reason)
 
         return True, None
     except ImportError:
