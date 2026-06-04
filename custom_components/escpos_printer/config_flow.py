@@ -71,7 +71,7 @@ class EscposConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self._cups_server = cups_server
 
             # Check if CUPS is available at this server
-            cups_available = await self.hass.async_add_executor_job(is_cups_available, cups_server)
+            cups_available = await is_cups_available(cups_server)
             if cups_available:
                 _LOGGER.debug("CUPS server '%s' is available", cups_server or "localhost")
                 return await self.async_step_printer()
@@ -102,7 +102,7 @@ class EscposConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         # Get available CUPS printers from the configured server
         try:
-            available_printers = await self.hass.async_add_executor_job(get_cups_printers, self._cups_server)
+            available_printers = await get_cups_printers(self._cups_server)
         except Exception as e:
             _LOGGER.warning("Failed to enumerate CUPS printers: %s", e)
             available_printers = []
@@ -124,7 +124,7 @@ class EscposConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             _LOGGER.debug(
                 "Checking CUPS printer availability: %s on server %s", printer_name, self._cups_server or "localhost"
             )
-            ok = await self.hass.async_add_executor_job(is_cups_printer_available, printer_name, self._cups_server)
+            ok = await is_cups_printer_available(printer_name, self._cups_server)
             if ok:
                 _LOGGER.debug("CUPS printer '%s' is available", printer_name)
 

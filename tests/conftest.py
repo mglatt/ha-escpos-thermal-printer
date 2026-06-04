@@ -1,4 +1,5 @@
 from collections.abc import Generator
+from enum import IntEnum
 import sys
 import threading
 import types
@@ -85,41 +86,90 @@ def fake_escpos_module(request: Any) -> Generator[None, None, None]:
 
 
 @pytest.fixture(autouse=True)
-def fake_cups_module(request: Any) -> Generator[None, None, None]:
-    """Provide a fake cups module for unit tests."""
+def fake_pyipp_module(request: Any) -> Generator[None, None, None]:
+    """Provide a fake pyipp module for unit tests."""
     if request.node.get_closest_marker("integration"):
         yield
         return
 
-    cups = types.ModuleType("cups")
+    class _IppPrinterState(IntEnum):
+        IDLE = 3
+        PROCESSING = 4
+        STOPPED = 5
 
-    class _FakeConnection:
-        _job_counter = 0
+    class _IppOperation(IntEnum):
+        CUPS_GET_DEFAULT = 0x4001
+        CUPS_GET_PRINTERS = 0x4002
+        GET_PRINTER_ATTRIBUTES = 0x000B
 
-        def __init__(self, *_, **__):  # type: ignore[no-untyped-def]
+    class _FakeAttribute:
+        def __init__(self, value: Any) -> None:
+            self.value = value
+
+    class _FakeGroup:
+        def __init__(self, attributes: dict[str, Any]) -> None:
+            self.attributes = attributes
+
+    class _FakeResponse:
+        def __init__(self, groups: list[Any]) -> None:
+            self.groups = groups
+
+    class _FakePrinter:
+        def __init__(self) -> None:
+            self.state = _IppPrinterState.IDLE
+            self.state_reasons: list[str] = ["none"]
+
+    class _FakePrintJob:
+        _counter = 0
+
+        def __init__(self) -> None:
+            _FakePrintJob._counter += 1
+            self.id = _FakePrintJob._counter
+
+    class _FakeIppClient:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
             pass
 
-        def getPrinters(self) -> dict[str, dict[str, Any]]:
-            return {
-                "TestPrinter": {
-                    "printer-state": 3,  # idle
-                    "printer-state-reasons": ["none"],
-                }
-            }
+        async def __aenter__(self) -> "_FakeIppClient":
+            return self
 
-        def printFile(self, printer: str, filename: str, title: str, options: dict[str, str]) -> int:
-            """Fake printFile that returns a job ID."""
-            _FakeConnection._job_counter += 1
-            return _FakeConnection._job_counter
+        async def __aexit__(self, *args: Any) -> None:
+            pass
 
-    def _setServer(server: str) -> None:
-        """Fake setServer function."""
-        pass
+        async def printer(self) -> _FakePrinter:
+            return _FakePrinter()
 
-    cups.Connection = _FakeConnection  # type: ignore[attr-defined]
-    cups.setServer = _setServer  # type: ignore[attr-defined]
-    sys.modules.setdefault("cups", cups)
+        async def print_job(self, document: bytes, **kwargs: Any) -> _FakePrintJob:
+            return _FakePrintJob()
+
+        async def execute(self, operation: Any, request_data: Any) -> _FakeResponse:
+            if operation == _IppOperation.CUPS_GET_PRINTERS:
+                group = _FakeGroup({"printer-name": _FakeAttribute("TestPrinter")})
+                return _FakeResponse([group])
+            return _FakeResponse([])
+
+    pyipp_mod = types.ModuleType("pyipp")
+    pyipp_enums_mod = types.ModuleType("pyipp.enums")
+
+    pyipp_mod.IppClient = _FakeIppClient  # type: ignore[attr-defined]
+    pyipp_enums_mod.IppPrinterState = _IppPrinterState  # type: ignore[attr-defined]
+    pyipp_enums_mod.IppOperation = _IppOperation  # type: ignore[attr-defined]
+
+    orig_pyipp = sys.modules.get("pyipp")
+    orig_pyipp_enums = sys.modules.get("pyipp.enums")
+    sys.modules["pyipp"] = pyipp_mod
+    sys.modules["pyipp.enums"] = pyipp_enums_mod
+
     yield
+
+    if orig_pyipp is None:
+        sys.modules.pop("pyipp", None)
+    else:
+        sys.modules["pyipp"] = orig_pyipp
+    if orig_pyipp_enums is None:
+        sys.modules.pop("pyipp.enums", None)
+    else:
+        sys.modules["pyipp.enums"] = orig_pyipp_enums
 
 
 @pytest.fixture(autouse=True)
