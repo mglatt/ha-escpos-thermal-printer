@@ -40,168 +40,157 @@ def _get_dummy_printer() -> type[Any]:
     return Dummy  # type: ignore[no-any-return]
 
 
-def _submit_to_cups(printer_name: str, data: bytes, server: str | None = None) -> int:
-    """Submit raw data to CUPS printer.
-
-    Args:
-        printer_name: Name of the CUPS printer.
-        data: Raw ESC/POS data to print.
-        server: CUPS server address (optional).
-
-    Returns:
-        CUPS job ID.
-    """
-    import tempfile  # noqa: PLC0415
-
-    conn = _get_cups_connection(server)
-
-    # Write data to a temporary file and submit to CUPS
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".raw") as tmp:
-        tmp.write(data)
-        tmp_path = tmp.name
-
-    try:
-        # Submit the raw file to CUPS
-        # Use 'raw' option to tell CUPS to send data as-is without filtering
-        job_id = conn.printFile(
-            printer_name,
-            tmp_path,
-            "ESC/POS Print Job",
-            {"raw": "true"}
-        )
-        _LOGGER.debug("Submitted CUPS job %d to printer '%s'", job_id, printer_name)
-        return job_id
-    finally:
-        # Clean up temp file
-        import os  # noqa: PLC0415
+def _parse_cups_server(server: str | None) -> tuple[str, int]:
+    """Parse 'host' or 'host:port' into (host, port). Defaults to localhost:631."""
+    if not server:
+        return "localhost", 631
+    if ":" in server:
+        host, port_str = server.rsplit(":", 1)
         try:
-            os.unlink(tmp_path)
-        except Exception:
+            return host, int(port_str)
+        except ValueError:
             pass
+    return server, 631
 
 
-def _get_cups_connection(server: str | None = None) -> Any:
-    """Get a CUPS connection, optionally to a remote server.
+async def _submit_to_cups(printer_name: str, data: bytes, server: str | None = None) -> int:
+    """Submit raw ESC/POS bytes to a CUPS printer via IPP.
 
     Args:
-        server: CUPS server address (e.g., 'hostname' or 'hostname:port').
-                If None, connects to localhost.
+        printer_name: CUPS printer queue name.
+        data: Raw ESC/POS bytes to send.
+        server: CUPS server address ('host' or 'host:port'). None means localhost.
 
     Returns:
-        cups.Connection object.
+        IPP print job ID.
     """
-    import cups  # noqa: PLC0415
+    from pyipp import IppClient  # noqa: PLC0415
 
-    # Always explicitly set the server to avoid stale global state from previous calls.
-    # pycups stores the server globally, so we must reset it every time.
-    cups.setServer(server or "")
-    return cups.Connection()
+    host, port = _parse_cups_server(server)
+    async with IppClient(host=host, port=port, base_path=f"/printers/{printer_name}") as client:
+        job = await client.print_job(
+            document=data,
+            document_name="ESC/POS Print Job",
+            # application/vnd.cups-raw bypasses CUPS filters and sends data as-is
+            document_format="application/vnd.cups-raw",
+        )
+        _LOGGER.debug("Submitted IPP job %s to printer '%s'", job.id, printer_name)
+        return job.id
 
 
-def is_cups_available(server: str | None = None) -> bool:
-    """Check if CUPS is available on the system.
+async def is_cups_available(server: str | None = None) -> bool:
+    """Return True if the CUPS server at *server* is reachable via IPP.
 
     Args:
-        server: CUPS server address. If None, connects to localhost.
+        server: CUPS server address. None means localhost.
 
     Returns:
-        True if CUPS/pycups is available, False otherwise.
+        True if the server responds to IPP requests.
     """
     try:
-        import cups  # noqa: PLC0415
+        from pyipp import IppClient  # noqa: PLC0415
+        from pyipp.enums import IppOperation  # noqa: PLC0415
 
-        _get_cups_connection(server)
+        host, port = _parse_cups_server(server)
+        async with IppClient(host=host, port=port, base_path="/") as client:
+            await client.execute(IppOperation.CUPS_GET_PRINTERS, {"operation-attributes-tag": {}})
         return True
     except ImportError:
-        _LOGGER.warning("pycups library not available - CUPS printing disabled")
+        _LOGGER.warning("pyipp library not available — CUPS printing disabled")
         return False
     except Exception as e:
         _LOGGER.warning("CUPS not available: %s", sanitize_log_message(str(e)))
         return False
 
 
-def get_cups_printers(server: str | None = None) -> list[str]:
-    """Get list of available CUPS printers.
+async def get_cups_printers(server: str | None = None) -> list[str]:
+    """Return printer names registered on the CUPS server.
 
     Args:
-        server: CUPS server address. If None, connects to localhost.
+        server: CUPS server address. None means localhost.
 
     Returns:
-        List of CUPS printer names.
+        List of CUPS printer queue names.
     """
     try:
-        conn = _get_cups_connection(server)
-        printers = conn.getPrinters()
-        return list(printers.keys())
+        from pyipp import IppClient  # noqa: PLC0415
+        from pyipp.enums import IppOperation  # noqa: PLC0415
+
+        host, port = _parse_cups_server(server)
+        async with IppClient(host=host, port=port, base_path="/") as client:
+            response = await client.execute(
+                IppOperation.CUPS_GET_PRINTERS,
+                {"operation-attributes-tag": {}},
+            )
+        printers: list[str] = []
+        for group in response.groups:
+            attrs = group.attributes
+            if "printer-name" in attrs:
+                name_attr = attrs["printer-name"]
+                printers.append(name_attr.value if hasattr(name_attr, "value") else str(name_attr))
+        return printers
     except ImportError:
-        _LOGGER.warning("pycups library not available")
+        _LOGGER.warning("pyipp library not available")
         return []
     except Exception as e:
         _LOGGER.warning("Failed to get CUPS printers: %s", sanitize_log_message(str(e)))
         return []
 
 
-def is_cups_printer_available(printer_name: str, server: str | None = None) -> bool:
-    """Check if a CUPS printer exists.
+async def is_cups_printer_available(printer_name: str, server: str | None = None) -> bool:
+    """Return True if *printer_name* exists on the CUPS server.
 
     Args:
-        printer_name: Name of the CUPS printer to check.
-        server: CUPS server address. If None, connects to localhost.
+        printer_name: CUPS queue name.
+        server: CUPS server address. None means localhost.
 
     Returns:
-        True if printer exists, False otherwise.
+        True if the printer responds to Get-Printer-Attributes.
     """
     try:
-        conn = _get_cups_connection(server)
-        printers = conn.getPrinters()
-        return printer_name in printers
+        from pyipp import IppClient  # noqa: PLC0415
+
+        host, port = _parse_cups_server(server)
+        async with IppClient(host=host, port=port, base_path=f"/printers/{printer_name}") as client:
+            await client.printer()
+        return True
     except ImportError:
-        _LOGGER.warning("pycups library not available")
+        _LOGGER.warning("pyipp library not available")
         return False
     except Exception as e:
         _LOGGER.warning("Failed to check CUPS printer: %s", sanitize_log_message(str(e)))
         return False
 
 
-def get_cups_printer_status(printer_name: str, server: str | None = None) -> tuple[bool, str | None]:
-    """Get status of a CUPS printer.
+async def get_cups_printer_status(printer_name: str, server: str | None = None) -> tuple[bool, str | None]:
+    """Return (is_available, error_message) for *printer_name*.
 
     Args:
-        printer_name: Name of the CUPS printer.
-        server: CUPS server address. If None, connects to localhost.
+        printer_name: CUPS queue name.
+        server: CUPS server address. None means localhost.
 
     Returns:
-        Tuple of (is_available, error_message).
+        Tuple of (printer_ok, error_message). error_message is None when ok.
     """
     try:
-        import cups  # noqa: PLC0415
-    except ImportError:
-        return False, "pycups library not available"
+        from pyipp import IppClient  # noqa: PLC0415
+        from pyipp.enums import IppPrinterState  # noqa: PLC0415
 
-    try:
-        conn = _get_cups_connection(server)
-        printers = conn.getPrinters()
-        if printer_name not in printers:
-            return False, "Printer not found"
+        host, port = _parse_cups_server(server)
+        async with IppClient(host=host, port=port, base_path=f"/printers/{printer_name}") as client:
+            printer = await client.printer()
 
-        printer_info = printers[printer_name]
-        # CUPS printer states: 3=idle, 4=processing, 5=stopped
-        state = printer_info.get("printer-state", 0)
-        state_reasons = printer_info.get("printer-state-reasons", [])
-
-        if state == 5:  # Stopped
-            reason = state_reasons[0] if state_reasons else "Printer stopped"
+        if printer.state == IppPrinterState.STOPPED:
+            reasons = getattr(printer, "state_reasons", None) or []
+            reason = reasons[0] if reasons else "Printer stopped"
             return False, str(reason)
 
-        # Check for error states in reasons
-        if state_reasons and state_reasons != ["none"]:
-            for reason in state_reasons:
-                if "error" in str(reason).lower():
-                    return False, str(reason)
-
         return True, None
+    except ImportError:
+        return False, "pyipp library not available"
     except Exception as e:
         return False, str(e)
+
 
 
 @dataclass
@@ -260,23 +249,22 @@ class EscposPrinterAdapter:
         _LOGGER.debug("Dummy printer created: %s", printer)
         return printer
 
-    def _submit_job(self, printer: Any) -> int | None:
-        """Submit the Dummy printer's output to CUPS.
+    async def _submit_job(self, printer: Any) -> int | None:
+        """Submit the Dummy printer's output to CUPS via IPP.
 
         Args:
             printer: The Dummy printer instance with buffered ESC/POS data.
 
         Returns:
-            CUPS job ID, or None if no data to print.
+            IPP job ID, or None if no data to print.
         """
-        # Get the accumulated ESC/POS data from Dummy printer
         data = printer.output
         if not data:
             _LOGGER.debug("No data to submit to CUPS")
             return None
 
         _LOGGER.debug("Submitting %d bytes to CUPS printer '%s'", len(data), self._config.printer_name)
-        job_id = _submit_to_cups(
+        job_id = await _submit_to_cups(
             self._config.printer_name,
             data,
             self._config.cups_server
@@ -310,14 +298,10 @@ class EscposPrinterAdapter:
         self._printer = None
 
     async def _status_check(self, hass: HomeAssistant) -> None:
-        # CUPS printer status check
-        def _probe() -> tuple[bool, str | None, int | None]:
-            start = time.perf_counter()
-            ok, err = get_cups_printer_status(self._config.printer_name, self._config.cups_server)
-            latency_ms = int((time.perf_counter() - start) * 1000)
-            return ok, err, latency_ms
-
-        ok, err, latency_ms = await hass.async_add_executor_job(_probe)
+        # CUPS printer status check via IPP (native async, no executor needed)
+        start = time.perf_counter()
+        ok, err = await get_cups_printer_status(self._config.printer_name, self._config.cups_server)
+        latency_ms = int((time.perf_counter() - start) * 1000)
         now = dt_util.utcnow()
         self._last_check = now
         self._last_latency_ms = latency_ms
@@ -544,7 +528,7 @@ class EscposPrinterAdapter:
                 # Submit to CUPS
                 if not self._keepalive:
                     _LOGGER.debug("Submitting job to CUPS...")
-                    job_id = await hass.async_add_executor_job(self._submit_job, printer)
+                    job_id = await self._submit_job(printer)
                     _LOGGER.debug("CUPS job submitted: %s", job_id)
             except Exception as e:
                 _LOGGER.error("print_text failed: %s", sanitize_log_message(str(e)))
@@ -601,7 +585,7 @@ class EscposPrinterAdapter:
                 await self._apply_cut_and_feed(hass, printer, cut, feed)
                 # Submit to CUPS
                 if not self._keepalive:
-                    job_id = await hass.async_add_executor_job(self._submit_job, printer)
+                    job_id = await self._submit_job(printer)
                     _LOGGER.debug("CUPS job submitted for QR: %s", job_id)
             except Exception as e:
                 _LOGGER.error("print_qr failed: %s", sanitize_log_message(str(e)))
@@ -674,7 +658,7 @@ class EscposPrinterAdapter:
                 await self._apply_cut_and_feed(hass, printer, cut, feed)
                 # Submit to CUPS
                 if not self._keepalive:
-                    job_id = await hass.async_add_executor_job(self._submit_job, printer)
+                    job_id = await self._submit_job(printer)
                     _LOGGER.debug("CUPS job submitted for image: %s", job_id)
             except Exception as e:
                 _LOGGER.error("print_image failed: %s", sanitize_log_message(str(e)))
@@ -714,7 +698,7 @@ class EscposPrinterAdapter:
                 await hass.async_add_executor_job(_feed_inner, printer)
                 # Submit to CUPS
                 if not self._keepalive:
-                    job_id = await hass.async_add_executor_job(self._submit_job, printer)
+                    job_id = await self._submit_job(printer)
                     _LOGGER.debug("CUPS job submitted for feed: %s", job_id)
             except Exception as e:
                 _LOGGER.error("feed failed: %s", sanitize_log_message(str(e)))
@@ -736,7 +720,7 @@ class EscposPrinterAdapter:
                 await hass.async_add_executor_job(_cut_inner, printer)
                 # Submit to CUPS
                 if not self._keepalive:
-                    job_id = await hass.async_add_executor_job(self._submit_job, printer)
+                    job_id = await self._submit_job(printer)
                     _LOGGER.debug("CUPS job submitted for cut: %s", job_id)
             except Exception as e:
                 _LOGGER.error("cut failed: %s", sanitize_log_message(str(e)))
@@ -812,7 +796,7 @@ class EscposPrinterAdapter:
                 await self._apply_cut_and_feed(hass, printer, cut, feed)
                 # Submit to CUPS
                 if not self._keepalive:
-                    job_id = await hass.async_add_executor_job(self._submit_job, printer)
+                    job_id = await self._submit_job(printer)
                     _LOGGER.debug("CUPS job submitted for barcode: %s", job_id)
             except Exception as e:
                 _LOGGER.error("print_barcode failed: %s", sanitize_log_message(str(e)))
@@ -838,7 +822,7 @@ class EscposPrinterAdapter:
                 await hass.async_add_executor_job(_beep_inner, printer)
                 # Submit to CUPS
                 if not self._keepalive:
-                    job_id = await hass.async_add_executor_job(self._submit_job, printer)
+                    job_id = await self._submit_job(printer)
                     _LOGGER.debug("CUPS job submitted for beep: %s", job_id)
             except Exception as e:
                 _LOGGER.error("beep failed: %s", sanitize_log_message(str(e)))
