@@ -58,14 +58,14 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
     Returns:
         True if migration successful
     """
-    if config_entry.version == 1:
+    new_data = dict(config_entry.data)
+    current = config_entry.version
+
+    if current < 2:
         _LOGGER.info(
-            "Migrating config entry %s from version 1 to 2", config_entry.entry_id
+            "Migrating config entry %s from version %s to 2", config_entry.entry_id, current
         )
 
-        new_data = dict(config_entry.data)
-
-        # Profile: validate it exists
         old_profile = new_data.get(CONF_PROFILE, "")
         if old_profile and not is_valid_profile(old_profile):
             _LOGGER.warning(
@@ -73,23 +73,27 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
                 old_profile,
             )
 
-        # Ensure all expected fields exist with defaults
-        # Empty string for codepage means "auto-detect"
         new_data.setdefault(CONF_PROFILE, PROFILE_AUTO)
         new_data.setdefault(CONF_CODEPAGE, "")
         new_data.setdefault(CONF_LINE_WIDTH, DEFAULT_LINE_WIDTH)
         new_data.setdefault(CONF_DEFAULT_ALIGN, DEFAULT_ALIGN)
         new_data.setdefault(CONF_DEFAULT_CUT, DEFAULT_CUT)
+        current = 2
 
+    if current < 4:
+        _LOGGER.info(
+            "Migrating config entry %s from version %s to 4", config_entry.entry_id, current
+        )
+        current = 4
+
+    if config_entry.version != current:
         hass.config_entries.async_update_entry(
             config_entry,
             data=new_data,
-            version=2,
+            version=current,
             minor_version=0,
         )
-
-        _LOGGER.info("Migration complete for entry %s", config_entry.entry_id)
-        return True
+        _LOGGER.info("Migration complete for entry %s (now version %s)", config_entry.entry_id, current)
 
     return True
 
