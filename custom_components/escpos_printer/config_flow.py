@@ -45,7 +45,7 @@ _LOGGER = logging.getLogger(__name__)
 class EscposConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Config flow for ESC/POS Thermal Printer."""
 
-    VERSION = 2
+    VERSION = 4
 
     def __init__(self) -> None:
         """Initialize config flow."""
