@@ -43,7 +43,7 @@ class EscposOnlineSensor(BinarySensorEntity):
             identifiers={(DOMAIN, self._entry.entry_id)},
             name=f"ESC/POS Printer {self._entry.title}",
             manufacturer="ESC/POS",
-            model="Network Printer",
+            model="CUPS Printer",
         )
 
     async def async_added_to_hass(self) -> None:

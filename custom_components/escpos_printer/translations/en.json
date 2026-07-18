@@ -22,7 +22,7 @@
         },
         "data_description": {
           "printer_name": "Select the CUPS printer to use.",
-          "timeout": "Operation timeout in seconds.",
+          "timeout": "IPP request timeout for CUPS operations, in seconds.",
           "profile": "Select your printer model or Auto-detect. Choose 'Custom' to enter a profile name manually."
         }
       },
@@ -99,7 +99,7 @@
           "status_interval": "Status check interval (seconds)"
         },
         "data_description": {
-          "timeout": "Operation timeout in seconds.",
+          "timeout": "IPP request timeout for CUPS operations, in seconds.",
           "profile": "Select your printer model. Changing this will reset encoding options.",
           "codepage": "Character encoding/codepage for text.",
           "line_width": "Number of characters per line (columns).",
