@@ -36,7 +36,12 @@ from .const import (
     DEFAULT_TIMEOUT,
     DOMAIN,
 )
-from .printer import get_cups_printers, is_cups_available, is_cups_printer_available
+from .printer import (
+    CupsError,
+    async_check_cups,
+    get_cups_printers,
+    is_cups_printer_available,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -70,13 +75,18 @@ class EscposConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self._cups_server = cups_server
 
             # Check if CUPS is available at this server
-            cups_available = await is_cups_available(cups_server)
-            if cups_available:
+            try:
+                await async_check_cups(cups_server)
+            except CupsError as err:
+                _LOGGER.warning(
+                    "CUPS server '%s' not available (%s)", cups_server or "localhost", err.reason
+                )
+                errors["base"] = (
+                    "cups_pyipp_missing" if err.reason == "pyipp_missing" else "cups_unavailable"
+                )
+            else:
                 _LOGGER.debug("CUPS server '%s' is available", cups_server or "localhost")
                 return await self.async_step_printer()
-
-            _LOGGER.warning("CUPS server '%s' not available", cups_server or "localhost")
-            errors["base"] = "cups_unavailable"
 
         data_schema = vol.Schema(
             {

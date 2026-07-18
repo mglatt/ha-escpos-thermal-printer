@@ -32,6 +32,30 @@ from .security import (
 _LOGGER = logging.getLogger(__name__)
 
 
+class CupsError(Exception):
+    """A CUPS server check failed.
+
+    ``reason`` is a coarse machine-readable category:
+    ``pyipp_missing`` (IPP client library not installed),
+    ``connect`` (server unreachable or timed out), or ``other``.
+    """
+
+    def __init__(self, reason: str, message: str) -> None:
+        super().__init__(message)
+        self.reason = reason
+
+
+def _is_connection_error(err: Exception) -> bool:
+    """Classify *err* as a connectivity failure without importing pyipp exceptions.
+
+    Matched by type name so the check also works when pyipp is stubbed in tests.
+    """
+    if isinstance(err, TimeoutError | ConnectionError | OSError):
+        return True
+    name = type(err).__name__
+    return "Connection" in name or "Timeout" in name or "ClientError" in name
+
+
 # Late import of python-escpos to avoid import errors at HA startup if deps pending
 def _get_dummy_printer() -> type[Any]:
     """Get the Dummy printer class for building ESC/POS commands."""
@@ -142,6 +166,41 @@ async def _submit_to_cups(
     return job_id
 
 
+async def async_check_cups(server: str | None = None, timeout: float = DEFAULT_TIMEOUT) -> None:
+    """Probe the CUPS server at *server*; raise CupsError with a reason on failure.
+
+    Args:
+        server: CUPS server address. None means localhost.
+        timeout: IPP request timeout in seconds.
+
+    Raises:
+        CupsError: with reason "pyipp_missing", "connect", or "other".
+    """
+    try:
+        from pyipp import IPP  # noqa: PLC0415
+        from pyipp.enums import IppOperation  # noqa: PLC0415
+    except ImportError as e:
+        _LOGGER.warning("pyipp library not available — CUPS printing disabled")
+        raise CupsError("pyipp_missing", str(e)) from e
+
+    uri = _build_root_uri(server)
+    try:
+        async with IPP(uri, request_timeout=_ipp_timeout(timeout)) as ipp:
+            await ipp.raw(
+                IppOperation.CUPS_GET_PRINTERS,
+                {"operation-attributes-tag": {}},
+            )
+    except Exception as e:
+        reason = "connect" if _is_connection_error(e) else "other"
+        _LOGGER.warning(
+            "CUPS server check failed (%s): %s",
+            reason,
+            sanitize_log_message(str(e)),
+            exc_info=True,
+        )
+        raise CupsError(reason, str(e)) from e
+
+
 async def is_cups_available(server: str | None = None, timeout: float = DEFAULT_TIMEOUT) -> bool:
     """Return True if the CUPS server at *server* is reachable via IPP.
 
@@ -153,22 +212,10 @@ async def is_cups_available(server: str | None = None, timeout: float = DEFAULT_
         True if the server responds to IPP requests.
     """
     try:
-        from pyipp import IPP  # noqa: PLC0415
-        from pyipp.enums import IppOperation  # noqa: PLC0415
-
-        uri = _build_root_uri(server)
-        async with IPP(uri, request_timeout=_ipp_timeout(timeout)) as ipp:
-            await ipp.raw(
-                IppOperation.CUPS_GET_PRINTERS,
-                {"operation-attributes-tag": {}},
-            )
-        return True
-    except ImportError:
-        _LOGGER.warning("pyipp library not available — CUPS printing disabled")
+        await async_check_cups(server, timeout)
+    except CupsError:
         return False
-    except Exception as e:
-        _LOGGER.warning("CUPS not available: %s", sanitize_log_message(str(e)))
-        return False
+    return True
 
 
 async def get_cups_printers(server: str | None = None, timeout: float = DEFAULT_TIMEOUT) -> list[str]:
@@ -202,7 +249,9 @@ async def get_cups_printers(server: str | None = None, timeout: float = DEFAULT_
         _LOGGER.warning("pyipp library not available")
         return []
     except Exception as e:
-        _LOGGER.warning("Failed to get CUPS printers: %s", sanitize_log_message(str(e)))
+        _LOGGER.warning(
+            "Failed to get CUPS printers: %s", sanitize_log_message(str(e)), exc_info=True
+        )
         return []
 
 
