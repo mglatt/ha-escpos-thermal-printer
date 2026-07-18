@@ -22,7 +22,7 @@ jobs:
           python scripts/sync_manifest_requirements.py --check
       - name: Run tests
         run: |
-          pytest -q
+          pytest -q --cov
       - name: Install security tools
         run: |
           pip install safety bandit pip-audit

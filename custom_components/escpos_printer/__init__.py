@@ -14,7 +14,6 @@ from .const import (
     CONF_CUPS_SERVER,
     CONF_DEFAULT_ALIGN,
     CONF_DEFAULT_CUT,
-    CONF_KEEPALIVE,
     CONF_LINE_WIDTH,
     CONF_PRINTER_NAME,
     CONF_PROFILE,
@@ -129,10 +128,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         },
     }
 
-    # Start adapter background tasks (keepalive/status)
+    # Start adapter background tasks (status polling)
     await adapter.start(
         hass,
-        keepalive=bool(entry.options.get(CONF_KEEPALIVE, False)),
         status_interval=int(entry.options.get(CONF_STATUS_INTERVAL, 0)),
     )
 

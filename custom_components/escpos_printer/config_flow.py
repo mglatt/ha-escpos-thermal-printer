@@ -25,7 +25,6 @@ from .const import (
     CONF_CUPS_SERVER,
     CONF_DEFAULT_ALIGN,
     CONF_DEFAULT_CUT,
-    CONF_KEEPALIVE,
     CONF_LINE_WIDTH,
     CONF_PRINTER_NAME,
     CONF_PROFILE,
@@ -37,7 +36,12 @@ from .const import (
     DEFAULT_TIMEOUT,
     DOMAIN,
 )
-from .printer import get_cups_printers, is_cups_available, is_cups_printer_available
+from .printer import (
+    CupsError,
+    async_check_cups,
+    get_cups_printers,
+    is_cups_printer_available,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -71,13 +75,18 @@ class EscposConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self._cups_server = cups_server
 
             # Check if CUPS is available at this server
-            cups_available = await is_cups_available(cups_server)
-            if cups_available:
+            try:
+                await async_check_cups(cups_server)
+            except CupsError as err:
+                _LOGGER.warning(
+                    "CUPS server '%s' not available (%s)", cups_server or "localhost", err.reason
+                )
+                errors["base"] = (
+                    "cups_pyipp_missing" if err.reason == "pyipp_missing" else "cups_unavailable"
+                )
+            else:
                 _LOGGER.debug("CUPS server '%s' is available", cups_server or "localhost")
                 return await self.async_step_printer()
-
-            _LOGGER.warning("CUPS server '%s' not available", cups_server or "localhost")
-            errors["base"] = "cups_unavailable"
 
         data_schema = vol.Schema(
             {
@@ -124,7 +133,7 @@ class EscposConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             _LOGGER.debug(
                 "Checking CUPS printer availability: %s on server %s", printer_name, self._cups_server or "localhost"
             )
-            ok = await is_cups_printer_available(printer_name, self._cups_server)
+            ok = await is_cups_printer_available(printer_name, self._cups_server, timeout=timeout)
             if ok:
                 _LOGGER.debug("CUPS printer '%s' is available", printer_name)
 
@@ -607,10 +616,6 @@ class EscposOptionsFlowHandler(config_entries.OptionsFlow):
                     ),
                 ): vol.In(["left", "center", "right"]),
                 vol.Optional(CONF_DEFAULT_CUT, default=current_cut): vol.In(cut_choices),
-                vol.Optional(
-                    CONF_KEEPALIVE,
-                    default=self.config_entry.options.get(CONF_KEEPALIVE, False),
-                ): bool,
                 vol.Optional(
                     CONF_STATUS_INTERVAL,
                     default=self.config_entry.options.get(CONF_STATUS_INTERVAL, 0),

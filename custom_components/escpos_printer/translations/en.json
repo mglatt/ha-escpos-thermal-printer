@@ -22,7 +22,7 @@
         },
         "data_description": {
           "printer_name": "Select the CUPS printer to use.",
-          "timeout": "Operation timeout in seconds.",
+          "timeout": "IPP request timeout for CUPS operations, in seconds.",
           "profile": "Select your printer model or Auto-detect. Choose 'Custom' to enter a profile name manually."
         }
       },
@@ -76,6 +76,7 @@
     "error": {
       "cannot_connect": "CUPS printer not available.",
       "cups_unavailable": "CUPS server not available. Please check the server address and ensure CUPS is running.",
+      "cups_pyipp_missing": "The IPP client library (pyipp) is not installed. Restart Home Assistant so the integration's requirements are installed.",
       "no_printers": "No printers found on the CUPS server. Please check that printers are configured in CUPS.",
       "already_configured": "This printer is already configured.",
       "invalid_profile": "Invalid printer profile name.",
@@ -95,17 +96,15 @@
           "line_width": "Characters per line",
           "default_align": "Default alignment",
           "default_cut": "Default cut mode",
-          "keepalive": "Keep persistent connection",
           "status_interval": "Status check interval (seconds)"
         },
         "data_description": {
-          "timeout": "Operation timeout in seconds.",
+          "timeout": "IPP request timeout for CUPS operations, in seconds.",
           "profile": "Select your printer model. Changing this will reset encoding options.",
           "codepage": "Character encoding/codepage for text.",
           "line_width": "Number of characters per line (columns).",
           "default_align": "Default text alignment for printing.",
           "default_cut": "Default paper cut mode after printing.",
-          "keepalive": "Keep the CUPS connection open between print jobs.",
           "status_interval": "How often to check printer status (0 to disable)."
         }
       },

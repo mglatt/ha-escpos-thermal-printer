@@ -32,7 +32,7 @@ Connect thermal printers via CUPS and start printing in minutes.
 
 This integration uses **CUPS** (Common Unix Printing System) to send ESC/POS commands to your thermal printer:
 
-1. Connects to a CUPS server (local or remote) via the `pycups` library
+1. Connects to a CUPS server (local or remote) via the `pyipp` library (IPP protocol)
 2. Builds ESC/POS commands using `python-escpos`'s Dummy printer
 3. Submits raw print jobs directly to your CUPS printer queue
 
@@ -44,7 +44,7 @@ This approach allows printing to both USB-connected and network printers, as lon
 │ (this integration)│  │ (local/remote)  │   │ (USB/Network)   │
 └─────────────────┘   └─────────────────┘   └─────────────────┘
         │                      │
-        │ pycups library       │ Raw ESC/POS
+        │ pyipp library        │ Raw ESC/POS
         │ (IPP protocol)       │ commands
         ▼                      ▼
    Builds ESC/POS         Forwards to

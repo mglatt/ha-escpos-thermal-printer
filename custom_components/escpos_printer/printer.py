@@ -10,12 +10,12 @@ import textwrap
 import time
 from typing import Any
 
-import aiohttp
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.util import dt as dt_util
 from PIL import Image
 
-from .const import DEFAULT_ALIGN, DEFAULT_CUT
+from .const import DEFAULT_ALIGN, DEFAULT_CUT, DEFAULT_TIMEOUT
 from .security import (
     MAX_BEEP_TIMES,
     MAX_FEED_LINES,
@@ -32,12 +32,84 @@ from .security import (
 _LOGGER = logging.getLogger(__name__)
 
 
+class CupsError(Exception):
+    """A CUPS server check failed.
+
+    ``reason`` is a coarse machine-readable category:
+    ``pyipp_missing`` (IPP client library not installed),
+    ``connect`` (server unreachable or timed out), or ``other``.
+    """
+
+    def __init__(self, reason: str, message: str) -> None:
+        super().__init__(message)
+        self.reason = reason
+
+
+def _is_connection_error(err: Exception) -> bool:
+    """Classify *err* as a connectivity failure without importing pyipp exceptions.
+
+    Matched by type name so the check also works when pyipp is stubbed in tests.
+    """
+    if isinstance(err, TimeoutError | ConnectionError | OSError):
+        return True
+    name = type(err).__name__
+    return "Connection" in name or "Timeout" in name or "ClientError" in name
+
+
 # Late import of python-escpos to avoid import errors at HA startup if deps pending
 def _get_dummy_printer() -> type[Any]:
     """Get the Dummy printer class for building ESC/POS commands."""
     from escpos.printer import Dummy  # noqa: PLC0415
 
     return Dummy  # type: ignore[no-any-return]
+
+
+_MAX_IMAGE_WIDTH = 512
+
+
+def _resize_if_wide(img: Image.Image) -> Image.Image:
+    """Scale *img* down to the maximum printable width, keeping aspect ratio.
+
+    Blocking (PIL); run in an executor.
+    """
+    try:
+        orig_w, orig_h = img.width, img.height
+        if orig_w > _MAX_IMAGE_WIDTH:
+            ratio = _MAX_IMAGE_WIDTH / float(orig_w)
+            new_size = (_MAX_IMAGE_WIDTH, int(orig_h * ratio))
+            img = img.resize(new_size)
+            _LOGGER.debug("Resized image from %sx%s to %sx%s", orig_w, orig_h, new_size[0], new_size[1])
+    except Exception as e:
+        _LOGGER.debug("Image resize failed, printing original size: %s", sanitize_log_message(str(e)))
+    return img
+
+
+def _decode_image_bytes(content: bytes) -> Image.Image:
+    """Decode downloaded image bytes and resize if needed.
+
+    Blocking (PIL); run in an executor.
+    """
+    img = Image.open(io.BytesIO(content))
+    img.load()
+    return _resize_if_wide(img)
+
+
+def _load_image_file(path: str) -> Image.Image:
+    """Open a local image file and resize if needed.
+
+    Blocking (PIL); run in an executor.
+    """
+    img = Image.open(path)
+    img.load()
+    return _resize_if_wide(img)
+
+
+def _ipp_timeout(timeout: float) -> int:
+    """Convert the configured timeout (float seconds) to pyipp's int request_timeout.
+
+    Sub-second values round up to 1 second, pyipp's minimum granularity.
+    """
+    return max(1, round(timeout))
 
 
 def _build_printer_uri(printer_name: str, server: str | None = None) -> str:
@@ -56,13 +128,19 @@ def _build_root_uri(server: str | None = None) -> str:
     return f"ipp://{host}/"
 
 
-async def _submit_to_cups(printer_name: str, data: bytes, server: str | None = None) -> int:
+async def _submit_to_cups(
+    printer_name: str,
+    data: bytes,
+    server: str | None = None,
+    timeout: float = DEFAULT_TIMEOUT,
+) -> int:
     """Submit raw ESC/POS bytes to a CUPS printer via IPP.
 
     Args:
         printer_name: CUPS printer queue name.
         data: Raw ESC/POS bytes to send.
         server: CUPS server address ('host' or 'host:port'). None means localhost.
+        timeout: IPP request timeout in seconds.
 
     Returns:
         IPP job ID.
@@ -71,7 +149,7 @@ async def _submit_to_cups(printer_name: str, data: bytes, server: str | None = N
     from pyipp.enums import IppOperation  # noqa: PLC0415
 
     uri = _build_printer_uri(printer_name, server)
-    async with IPP(uri) as ipp:
+    async with IPP(uri, request_timeout=_ipp_timeout(timeout)) as ipp:
         response = await ipp.execute(
             IppOperation.PRINT_JOB,
             {
@@ -88,39 +166,64 @@ async def _submit_to_cups(printer_name: str, data: bytes, server: str | None = N
     return job_id
 
 
-async def is_cups_available(server: str | None = None) -> bool:
+async def async_check_cups(server: str | None = None, timeout: float = DEFAULT_TIMEOUT) -> None:
+    """Probe the CUPS server at *server*; raise CupsError with a reason on failure.
+
+    Args:
+        server: CUPS server address. None means localhost.
+        timeout: IPP request timeout in seconds.
+
+    Raises:
+        CupsError: with reason "pyipp_missing", "connect", or "other".
+    """
+    try:
+        from pyipp import IPP  # noqa: PLC0415
+        from pyipp.enums import IppOperation  # noqa: PLC0415
+    except ImportError as e:
+        _LOGGER.warning("pyipp library not available — CUPS printing disabled")
+        raise CupsError("pyipp_missing", str(e)) from e
+
+    uri = _build_root_uri(server)
+    try:
+        async with IPP(uri, request_timeout=_ipp_timeout(timeout)) as ipp:
+            await ipp.raw(
+                IppOperation.CUPS_GET_PRINTERS,
+                {"operation-attributes-tag": {}},
+            )
+    except Exception as e:
+        reason = "connect" if _is_connection_error(e) else "other"
+        _LOGGER.warning(
+            "CUPS server check failed (%s): %s",
+            reason,
+            sanitize_log_message(str(e)),
+            exc_info=True,
+        )
+        raise CupsError(reason, str(e)) from e
+
+
+async def is_cups_available(server: str | None = None, timeout: float = DEFAULT_TIMEOUT) -> bool:
     """Return True if the CUPS server at *server* is reachable via IPP.
 
     Args:
         server: CUPS server address. None means localhost.
+        timeout: IPP request timeout in seconds.
 
     Returns:
         True if the server responds to IPP requests.
     """
     try:
-        from pyipp import IPP  # noqa: PLC0415
-        from pyipp.enums import IppOperation  # noqa: PLC0415
-
-        uri = _build_root_uri(server)
-        async with IPP(uri) as ipp:
-            await ipp.raw(
-                IppOperation.CUPS_GET_PRINTERS,
-                {"operation-attributes-tag": {}},
-            )
-        return True
-    except ImportError:
-        _LOGGER.warning("pyipp library not available — CUPS printing disabled")
+        await async_check_cups(server, timeout)
+    except CupsError:
         return False
-    except Exception as e:
-        _LOGGER.warning("CUPS not available: %s", sanitize_log_message(str(e)))
-        return False
+    return True
 
 
-async def get_cups_printers(server: str | None = None) -> list[str]:
+async def get_cups_printers(server: str | None = None, timeout: float = DEFAULT_TIMEOUT) -> list[str]:
     """Return printer names registered on the CUPS server.
 
     Args:
         server: CUPS server address. None means localhost.
+        timeout: IPP request timeout in seconds.
 
     Returns:
         List of CUPS printer queue names.
@@ -130,7 +233,7 @@ async def get_cups_printers(server: str | None = None) -> list[str]:
         from pyipp.enums import IppOperation  # noqa: PLC0415
 
         uri = _build_root_uri(server)
-        async with IPP(uri) as ipp:
+        async with IPP(uri, request_timeout=_ipp_timeout(timeout)) as ipp:
             response = await ipp.execute(
                 IppOperation.CUPS_GET_PRINTERS,
                 {"operation-attributes-tag": {}},
@@ -146,16 +249,23 @@ async def get_cups_printers(server: str | None = None) -> list[str]:
         _LOGGER.warning("pyipp library not available")
         return []
     except Exception as e:
-        _LOGGER.warning("Failed to get CUPS printers: %s", sanitize_log_message(str(e)))
+        _LOGGER.warning(
+            "Failed to get CUPS printers: %s", sanitize_log_message(str(e)), exc_info=True
+        )
         return []
 
 
-async def is_cups_printer_available(printer_name: str, server: str | None = None) -> bool:
+async def is_cups_printer_available(
+    printer_name: str,
+    server: str | None = None,
+    timeout: float = DEFAULT_TIMEOUT,
+) -> bool:
     """Return True if *printer_name* exists on the CUPS server.
 
     Args:
         printer_name: CUPS queue name.
         server: CUPS server address. None means localhost.
+        timeout: IPP request timeout in seconds.
 
     Returns:
         True if the printer responds to Get-Printer-Attributes.
@@ -164,7 +274,7 @@ async def is_cups_printer_available(printer_name: str, server: str | None = None
         from pyipp import IPP  # noqa: PLC0415
 
         uri = _build_printer_uri(printer_name, server)
-        async with IPP(uri) as ipp:
+        async with IPP(uri, request_timeout=_ipp_timeout(timeout)) as ipp:
             await ipp.printer()
         return True
     except ImportError:
@@ -175,12 +285,17 @@ async def is_cups_printer_available(printer_name: str, server: str | None = None
         return False
 
 
-async def get_cups_printer_status(printer_name: str, server: str | None = None) -> tuple[bool, str | None]:
+async def get_cups_printer_status(
+    printer_name: str,
+    server: str | None = None,
+    timeout: float = DEFAULT_TIMEOUT,
+) -> tuple[bool, str | None]:
     """Return (is_available, error_message) for *printer_name*.
 
     Args:
         printer_name: CUPS queue name.
         server: CUPS server address. None means localhost.
+        timeout: IPP request timeout in seconds.
 
     Returns:
         Tuple of (printer_ok, error_message). error_message is None when ok.
@@ -189,7 +304,7 @@ async def get_cups_printer_status(printer_name: str, server: str | None = None) 
         from pyipp import IPP  # noqa: PLC0415
 
         uri = _build_printer_uri(printer_name, server)
-        async with IPP(uri) as ipp:
+        async with IPP(uri, request_timeout=_ipp_timeout(timeout)) as ipp:
             printer = await ipp.printer()
 
         state = getattr(printer, "state", None)
@@ -223,9 +338,7 @@ class EscposPrinterAdapter:
         self._config = config
         # Validate timeout eagerly
         self._config.timeout = validate_timeout(self._config.timeout)
-        self._keepalive: bool = False
         self._status_interval: int = 0
-        self._printer: Any = None
         self._lock = asyncio.Lock()
         self._cancel_status: Callable[[], None] | None = None
         self._status: bool | None = None
@@ -282,13 +395,12 @@ class EscposPrinterAdapter:
         job_id = await _submit_to_cups(
             self._config.printer_name,
             data,
-            self._config.cups_server
+            self._config.cups_server,
+            timeout=self._config.timeout,
         )
         return job_id
 
-    async def start(self, hass: HomeAssistant, *, keepalive: bool, status_interval: int) -> None:
-        # Note: keepalive is ignored for Dummy+CUPS approach - we always submit fresh
-        self._keepalive = False  # Force non-keepalive for Dummy printer approach
+    async def start(self, hass: HomeAssistant, *, status_interval: int) -> None:
         self._status_interval = max(0, int(status_interval))
 
         # Schedule status checks
@@ -309,13 +421,15 @@ class EscposPrinterAdapter:
         if self._cancel_status:
             self._cancel_status()
         self._cancel_status = None
-        # For Dummy printer, we don't need to close anything
-        self._printer = None
 
     async def _status_check(self, hass: HomeAssistant) -> None:
         # CUPS printer status check via IPP (native async, no executor needed)
         start = time.perf_counter()
-        ok, err = await get_cups_printer_status(self._config.printer_name, self._config.cups_server)
+        ok, err = await get_cups_printer_status(
+            self._config.printer_name,
+            self._config.cups_server,
+            timeout=self._config.timeout,
+        )
         latency_ms = int((time.perf_counter() - start) * 1000)
         now = dt_util.utcnow()
         self._last_check = now
@@ -465,8 +579,47 @@ class EscposPrinterAdapter:
 
             await hass.async_add_executor_job(_cut)
 
+    def _mark_success(self) -> None:
+        """Record a successful job: the printer is reachable."""
+        now = dt_util.utcnow()
+        self._status = True
+        self._last_ok = now
+        self._last_check = now
+        for cb in list(self._status_listeners):
+            with contextlib.suppress(Exception):
+                cb(True)
+
+    async def _run_job(
+        self,
+        hass: HomeAssistant,
+        op_name: str,
+        build: Callable[[Any], None],
+        *,
+        cut: str | None = None,
+        feed: int | None = None,
+        apply_cut_feed: bool = True,
+    ) -> None:
+        """Build ESC/POS bytes with *build* and submit them to CUPS as one job.
+
+        Creates a fresh Dummy buffer, runs the (blocking) build function in the
+        executor, optionally applies trailing feed/cut, and submits the buffered
+        bytes over IPP. Marks the printer reachable on success.
+        """
+        async with self._lock:
+            printer = await hass.async_add_executor_job(self._connect)
+            try:
+                await hass.async_add_executor_job(build, printer)
+                if apply_cut_feed:
+                    await self._apply_cut_and_feed(hass, printer, cut, feed)
+                job_id = await self._submit_job(printer)
+                _LOGGER.debug("CUPS job submitted for %s: %s", op_name, job_id)
+            except Exception as e:
+                _LOGGER.error("%s failed: %s", op_name, sanitize_log_message(str(e)))
+                raise
+        self._mark_success()
+
     # Operations
-    async def print_text(  # noqa: PLR0915
+    async def print_text(
         self,
         hass: HomeAssistant,
         *,
@@ -533,29 +686,7 @@ class EscposPrinterAdapter:
                 printer.text(text_to_print)
                 _LOGGER.debug("Text sent to buffer")
 
-        async with self._lock:
-            # Use a single printer instance for the entire operation
-            printer = (self._printer if self._keepalive and self._printer is not None
-                       else await hass.async_add_executor_job(self._connect))
-            try:
-                await hass.async_add_executor_job(_do_full_print, printer)
-                await self._apply_cut_and_feed(hass, printer, cut, feed)
-                # Submit to CUPS
-                if not self._keepalive:
-                    _LOGGER.debug("Submitting job to CUPS...")
-                    job_id = await self._submit_job(printer)
-                    _LOGGER.debug("CUPS job submitted: %s", job_id)
-            except Exception as e:
-                _LOGGER.error("print_text failed: %s", sanitize_log_message(str(e)))
-                raise
-        # Successful operation implies reachable
-        now = dt_util.utcnow()
-        self._status = True
-        self._last_ok = now
-        self._last_check = now
-        for cb in list(self._status_listeners):
-            with contextlib.suppress(Exception):
-                cb(True)
+        await self._run_job(hass, "print_text", _do_full_print, cut=cut, feed=feed)
 
     async def print_qr(
         self,
@@ -592,21 +723,9 @@ class EscposPrinterAdapter:
                 printer.set(align=align_m)
             printer.qr(data, size=qsize, ec=_map_qr_ec(qec))
 
-        async with self._lock:
-            printer = (self._printer if self._keepalive and self._printer is not None
-                       else await hass.async_add_executor_job(self._connect))
-            try:
-                await hass.async_add_executor_job(_do_print, printer)
-                await self._apply_cut_and_feed(hass, printer, cut, feed)
-                # Submit to CUPS
-                if not self._keepalive:
-                    job_id = await self._submit_job(printer)
-                    _LOGGER.debug("CUPS job submitted for QR: %s", job_id)
-            except Exception as e:
-                _LOGGER.error("print_qr failed: %s", sanitize_log_message(str(e)))
-                raise
+        await self._run_job(hass, "print_qr", _do_print, cut=cut, feed=feed)
 
-    async def print_image(  # noqa: PLR0915
+    async def print_image(
         self,
         hass: HomeAssistant,
         *,
@@ -622,38 +741,21 @@ class EscposPrinterAdapter:
         if image.lower().startswith(("http://", "https://")):
             _LOGGER.debug("Downloading image from URL: %s", sanitize_log_message(image, ["text", "data"]))
             url = validate_image_url(image)
-            # Use a local ClientSession to avoid depending on HA http component in unit tests
-            session = aiohttp.ClientSession()
+            session = async_get_clientsession(hass)
+            resp = await session.get(url)
             try:
-                resp = await session.get(url)
-                try:
-                    resp.raise_for_status()
-                    content = await resp.read()
-                finally:
-                    with contextlib.suppress(Exception):
-                        resp.close()
+                resp.raise_for_status()
+                content = await resp.read()
             finally:
                 with contextlib.suppress(Exception):
-                    await session.close()
-            img_obj = Image.open(io.BytesIO(content))
+                    resp.release()
+            img_obj = await hass.async_add_executor_job(_decode_image_bytes, content)
         else:
             _LOGGER.debug("Opening local image: %s", image)
             path = validate_local_image_path(image)
-            img_obj = await hass.async_add_executor_job(Image.open, path)
+            img_obj = await hass.async_add_executor_job(_load_image_file, path)
 
         align_m = self._map_align(align)
-
-        # Resize overly wide images to a sane default (e.g., 512px)
-        try:
-            max_width = 512
-            orig_w, orig_h = img_obj.width, img_obj.height
-            if orig_w > max_width:
-                ratio = max_width / float(orig_w)
-                new_size = (max_width, int(orig_h * ratio))
-                img_obj = img_obj.resize(new_size)
-                _LOGGER.debug("Resized image from %sx%s to %sx%s", orig_w, orig_h, new_size[0], new_size[1])
-        except Exception:
-            pass
 
         def _do_print(printer: Any) -> None:
             if hasattr(printer, "set"):
@@ -665,19 +767,7 @@ class EscposPrinterAdapter:
                 # Fallback: convert to bytes via ESC/POS raster if possible
                 printer.text("[image printing not supported by this printer]\n")
 
-        async with self._lock:
-            printer = (self._printer if self._keepalive and self._printer is not None
-                       else await hass.async_add_executor_job(self._connect))
-            try:
-                await hass.async_add_executor_job(_do_print, printer)
-                await self._apply_cut_and_feed(hass, printer, cut, feed)
-                # Submit to CUPS
-                if not self._keepalive:
-                    job_id = await self._submit_job(printer)
-                    _LOGGER.debug("CUPS job submitted for image: %s", job_id)
-            except Exception as e:
-                _LOGGER.error("print_image failed: %s", sanitize_log_message(str(e)))
-                raise
+        await self._run_job(hass, "print_image", _do_print, cut=cut, feed=feed)
 
     async def feed(self, hass: HomeAssistant, *, lines: int) -> None:
         try:
@@ -706,18 +796,7 @@ class EscposPrinterAdapter:
                     for _ in range(lines_int):
                         printer.text("\n")
 
-        async with self._lock:
-            printer = (self._printer if self._keepalive and self._printer is not None
-                       else await hass.async_add_executor_job(self._connect))
-            try:
-                await hass.async_add_executor_job(_feed_inner, printer)
-                # Submit to CUPS
-                if not self._keepalive:
-                    job_id = await self._submit_job(printer)
-                    _LOGGER.debug("CUPS job submitted for feed: %s", job_id)
-            except Exception as e:
-                _LOGGER.error("feed failed: %s", sanitize_log_message(str(e)))
-                raise
+        await self._run_job(hass, "feed", _feed_inner, apply_cut_feed=False)
 
     async def cut(self, hass: HomeAssistant, *, mode: str) -> None:
         cut_mode = self._map_cut(mode)
@@ -728,18 +807,7 @@ class EscposPrinterAdapter:
         def _cut_inner(printer: Any) -> None:
             printer.cut(mode=cut_mode)
 
-        async with self._lock:
-            printer = (self._printer if self._keepalive and self._printer is not None
-                       else await hass.async_add_executor_job(self._connect))
-            try:
-                await hass.async_add_executor_job(_cut_inner, printer)
-                # Submit to CUPS
-                if not self._keepalive:
-                    job_id = await self._submit_job(printer)
-                    _LOGGER.debug("CUPS job submitted for cut: %s", job_id)
-            except Exception as e:
-                _LOGGER.error("cut failed: %s", sanitize_log_message(str(e)))
-                raise
+        await self._run_job(hass, "cut", _cut_inner, apply_cut_feed=False)
 
     async def print_barcode(
         self,
@@ -803,19 +871,7 @@ class EscposPrinterAdapter:
                 else:
                     raise
 
-        async with self._lock:
-            printer = (self._printer if self._keepalive and self._printer is not None
-                       else await hass.async_add_executor_job(self._connect))
-            try:
-                await hass.async_add_executor_job(_do_print, printer)
-                await self._apply_cut_and_feed(hass, printer, cut, feed)
-                # Submit to CUPS
-                if not self._keepalive:
-                    job_id = await self._submit_job(printer)
-                    _LOGGER.debug("CUPS job submitted for barcode: %s", job_id)
-            except Exception as e:
-                _LOGGER.error("print_barcode failed: %s", sanitize_log_message(str(e)))
-                raise
+        await self._run_job(hass, "print_barcode", _do_print, cut=cut, feed=feed)
 
     async def beep(self, hass: HomeAssistant, *, times: int = 2, duration: int = 4) -> None:
         times_v = validate_numeric_input(times, 1, MAX_BEEP_TIMES, "times")
@@ -823,22 +879,14 @@ class EscposPrinterAdapter:
 
         def _beep_inner(printer: Any) -> None:
             _LOGGER.debug("beep begin: times=%s duration=%s", times_v, duration_v)
-            if hasattr(printer, "buzzer"):
-                printer.buzzer(times_v, duration_v)
-            elif hasattr(printer, "beep"):
-                printer.beep(times_v, duration_v)
-            else:
+            try:
+                if hasattr(printer, "buzzer"):
+                    printer.buzzer(times_v, duration_v)
+                elif hasattr(printer, "beep"):
+                    printer.beep(times_v, duration_v)
+                else:
+                    _LOGGER.warning("Printer does not support buzzer")
+            except AttributeError:
                 _LOGGER.warning("Printer does not support buzzer")
 
-        async with self._lock:
-            printer = (self._printer if self._keepalive and self._printer is not None
-                       else await hass.async_add_executor_job(self._connect))
-            try:
-                await hass.async_add_executor_job(_beep_inner, printer)
-                # Submit to CUPS
-                if not self._keepalive:
-                    job_id = await self._submit_job(printer)
-                    _LOGGER.debug("CUPS job submitted for beep: %s", job_id)
-            except Exception as e:
-                _LOGGER.error("beep failed: %s", sanitize_log_message(str(e)))
-                raise
+        await self._run_job(hass, "beep", _beep_inner, apply_cut_feed=False)

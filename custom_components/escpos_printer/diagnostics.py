@@ -8,7 +8,6 @@ from homeassistant.core import HomeAssistant
 
 from .const import (
     CONF_CODEPAGE,
-    CONF_KEEPALIVE,
     CONF_LINE_WIDTH,
     CONF_PRINTER_NAME,
     CONF_PROFILE,
@@ -41,7 +40,6 @@ async def async_get_config_entry_diagnostics(
             "codepage": config.codepage if config else None,
             "line_width": config.line_width if config else None,
             "printer_name": config.printer_name if config else None,
-            "keepalive": getattr(adapter, "_keepalive", None),
             "status_interval": getattr(adapter, "_status_interval", None),
         }
 
@@ -58,7 +56,6 @@ async def async_get_config_entry_diagnostics(
                 CONF_CODEPAGE: options.get(CONF_CODEPAGE),
                 CONF_PROFILE: options.get(CONF_PROFILE),
                 CONF_LINE_WIDTH: options.get(CONF_LINE_WIDTH),
-                CONF_KEEPALIVE: options.get(CONF_KEEPALIVE),
                 CONF_STATUS_INTERVAL: options.get(CONF_STATUS_INTERVAL),
             },
         },

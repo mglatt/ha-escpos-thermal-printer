@@ -2,6 +2,13 @@
 
 A comprehensive framework for testing the Home Assistant ESCPOS thermal printer integration with realistic scenarios, virtual printer emulation, and Home Assistant automation testing.
 
+> **Note:** This suite predates the CUPS-only architecture. The virtual printer emulates a
+> direct TCP ESC/POS device, while the integration now submits jobs to CUPS over IPP —
+> so the network-transport and resilience scenarios here are legacy and do not exercise
+> the real submission path. The suite is excluded from the default pytest run (`-m 'not
+> integration'`). A future rewrite should emulate a CUPS/IPP server instead; the ESC/POS
+> byte-stream parsing parts remain reusable for validating generated output.
+
 ## Overview
 
 This framework enables thorough testing of the ESCPOS printer integration by providing:

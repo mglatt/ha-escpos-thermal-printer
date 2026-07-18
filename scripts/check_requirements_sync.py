@@ -57,6 +57,8 @@ def compatible(spec_py: SpecifierSet, spec_mani: SpecifierSet) -> bool:
         "11.0.0",
         "11.3.0",
         "0.16.1",
+        "0.17.0",
+        "12.0.0",
         "3.1",
     ]
     # If either is empty, treat as wildcard

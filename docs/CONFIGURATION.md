@@ -26,7 +26,7 @@ This guide covers all configuration options for the ESC/POS Thermal Printer inte
 |---------|-------------|---------|
 | Host | IP address or hostname of your printer | Required |
 | Port | TCP port number | 9100 |
-| Timeout | Connection timeout in seconds | 4.0 |
+| Timeout | IPP request timeout for CUPS operations, in seconds | 4.0 |
 | Printer Profile | Your printer model (see [Printer Profiles](#printer-profiles)) | Auto-detect |
 
 ### Printer Settings (Step 2)
@@ -68,7 +68,7 @@ Choose "Auto-detect" if your printer isn't listed. Choose "Custom" to enter a pr
 
 ### Timeout
 
-Connection timeout in seconds. Increase this if you have:
+IPP request timeout for CUPS operations, in seconds. Increase this if you have:
 
 - A slow network connection
 - A printer that takes time to wake up
