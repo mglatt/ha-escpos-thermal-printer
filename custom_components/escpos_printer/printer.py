@@ -249,9 +249,7 @@ class EscposPrinterAdapter:
         self._config = config
         # Validate timeout eagerly
         self._config.timeout = validate_timeout(self._config.timeout)
-        self._keepalive: bool = False
         self._status_interval: int = 0
-        self._printer: Any = None
         self._lock = asyncio.Lock()
         self._cancel_status: Callable[[], None] | None = None
         self._status: bool | None = None
@@ -334,8 +332,6 @@ class EscposPrinterAdapter:
         if self._cancel_status:
             self._cancel_status()
         self._cancel_status = None
-        # For Dummy printer, we don't need to close anything
-        self._printer = None
 
     async def _status_check(self, hass: HomeAssistant) -> None:
         # CUPS printer status check via IPP (native async, no executor needed)
@@ -494,6 +490,45 @@ class EscposPrinterAdapter:
 
             await hass.async_add_executor_job(_cut)
 
+    def _mark_success(self) -> None:
+        """Record a successful job: the printer is reachable."""
+        now = dt_util.utcnow()
+        self._status = True
+        self._last_ok = now
+        self._last_check = now
+        for cb in list(self._status_listeners):
+            with contextlib.suppress(Exception):
+                cb(True)
+
+    async def _run_job(
+        self,
+        hass: HomeAssistant,
+        op_name: str,
+        build: Callable[[Any], None],
+        *,
+        cut: str | None = None,
+        feed: int | None = None,
+        apply_cut_feed: bool = True,
+    ) -> None:
+        """Build ESC/POS bytes with *build* and submit them to CUPS as one job.
+
+        Creates a fresh Dummy buffer, runs the (blocking) build function in the
+        executor, optionally applies trailing feed/cut, and submits the buffered
+        bytes over IPP. Marks the printer reachable on success.
+        """
+        async with self._lock:
+            printer = await hass.async_add_executor_job(self._connect)
+            try:
+                await hass.async_add_executor_job(build, printer)
+                if apply_cut_feed:
+                    await self._apply_cut_and_feed(hass, printer, cut, feed)
+                job_id = await self._submit_job(printer)
+                _LOGGER.debug("CUPS job submitted for %s: %s", op_name, job_id)
+            except Exception as e:
+                _LOGGER.error("%s failed: %s", op_name, sanitize_log_message(str(e)))
+                raise
+        self._mark_success()
+
     # Operations
     async def print_text(  # noqa: PLR0915
         self,
@@ -562,29 +597,7 @@ class EscposPrinterAdapter:
                 printer.text(text_to_print)
                 _LOGGER.debug("Text sent to buffer")
 
-        async with self._lock:
-            # Use a single printer instance for the entire operation
-            printer = (self._printer if self._keepalive and self._printer is not None
-                       else await hass.async_add_executor_job(self._connect))
-            try:
-                await hass.async_add_executor_job(_do_full_print, printer)
-                await self._apply_cut_and_feed(hass, printer, cut, feed)
-                # Submit to CUPS
-                if not self._keepalive:
-                    _LOGGER.debug("Submitting job to CUPS...")
-                    job_id = await self._submit_job(printer)
-                    _LOGGER.debug("CUPS job submitted: %s", job_id)
-            except Exception as e:
-                _LOGGER.error("print_text failed: %s", sanitize_log_message(str(e)))
-                raise
-        # Successful operation implies reachable
-        now = dt_util.utcnow()
-        self._status = True
-        self._last_ok = now
-        self._last_check = now
-        for cb in list(self._status_listeners):
-            with contextlib.suppress(Exception):
-                cb(True)
+        await self._run_job(hass, "print_text", _do_full_print, cut=cut, feed=feed)
 
     async def print_qr(
         self,
@@ -621,19 +634,7 @@ class EscposPrinterAdapter:
                 printer.set(align=align_m)
             printer.qr(data, size=qsize, ec=_map_qr_ec(qec))
 
-        async with self._lock:
-            printer = (self._printer if self._keepalive and self._printer is not None
-                       else await hass.async_add_executor_job(self._connect))
-            try:
-                await hass.async_add_executor_job(_do_print, printer)
-                await self._apply_cut_and_feed(hass, printer, cut, feed)
-                # Submit to CUPS
-                if not self._keepalive:
-                    job_id = await self._submit_job(printer)
-                    _LOGGER.debug("CUPS job submitted for QR: %s", job_id)
-            except Exception as e:
-                _LOGGER.error("print_qr failed: %s", sanitize_log_message(str(e)))
-                raise
+        await self._run_job(hass, "print_qr", _do_print, cut=cut, feed=feed)
 
     async def print_image(  # noqa: PLR0915
         self,
@@ -694,19 +695,7 @@ class EscposPrinterAdapter:
                 # Fallback: convert to bytes via ESC/POS raster if possible
                 printer.text("[image printing not supported by this printer]\n")
 
-        async with self._lock:
-            printer = (self._printer if self._keepalive and self._printer is not None
-                       else await hass.async_add_executor_job(self._connect))
-            try:
-                await hass.async_add_executor_job(_do_print, printer)
-                await self._apply_cut_and_feed(hass, printer, cut, feed)
-                # Submit to CUPS
-                if not self._keepalive:
-                    job_id = await self._submit_job(printer)
-                    _LOGGER.debug("CUPS job submitted for image: %s", job_id)
-            except Exception as e:
-                _LOGGER.error("print_image failed: %s", sanitize_log_message(str(e)))
-                raise
+        await self._run_job(hass, "print_image", _do_print, cut=cut, feed=feed)
 
     async def feed(self, hass: HomeAssistant, *, lines: int) -> None:
         try:
@@ -735,18 +724,7 @@ class EscposPrinterAdapter:
                     for _ in range(lines_int):
                         printer.text("\n")
 
-        async with self._lock:
-            printer = (self._printer if self._keepalive and self._printer is not None
-                       else await hass.async_add_executor_job(self._connect))
-            try:
-                await hass.async_add_executor_job(_feed_inner, printer)
-                # Submit to CUPS
-                if not self._keepalive:
-                    job_id = await self._submit_job(printer)
-                    _LOGGER.debug("CUPS job submitted for feed: %s", job_id)
-            except Exception as e:
-                _LOGGER.error("feed failed: %s", sanitize_log_message(str(e)))
-                raise
+        await self._run_job(hass, "feed", _feed_inner, apply_cut_feed=False)
 
     async def cut(self, hass: HomeAssistant, *, mode: str) -> None:
         cut_mode = self._map_cut(mode)
@@ -757,18 +735,7 @@ class EscposPrinterAdapter:
         def _cut_inner(printer: Any) -> None:
             printer.cut(mode=cut_mode)
 
-        async with self._lock:
-            printer = (self._printer if self._keepalive and self._printer is not None
-                       else await hass.async_add_executor_job(self._connect))
-            try:
-                await hass.async_add_executor_job(_cut_inner, printer)
-                # Submit to CUPS
-                if not self._keepalive:
-                    job_id = await self._submit_job(printer)
-                    _LOGGER.debug("CUPS job submitted for cut: %s", job_id)
-            except Exception as e:
-                _LOGGER.error("cut failed: %s", sanitize_log_message(str(e)))
-                raise
+        await self._run_job(hass, "cut", _cut_inner, apply_cut_feed=False)
 
     async def print_barcode(
         self,
@@ -832,19 +799,7 @@ class EscposPrinterAdapter:
                 else:
                     raise
 
-        async with self._lock:
-            printer = (self._printer if self._keepalive and self._printer is not None
-                       else await hass.async_add_executor_job(self._connect))
-            try:
-                await hass.async_add_executor_job(_do_print, printer)
-                await self._apply_cut_and_feed(hass, printer, cut, feed)
-                # Submit to CUPS
-                if not self._keepalive:
-                    job_id = await self._submit_job(printer)
-                    _LOGGER.debug("CUPS job submitted for barcode: %s", job_id)
-            except Exception as e:
-                _LOGGER.error("print_barcode failed: %s", sanitize_log_message(str(e)))
-                raise
+        await self._run_job(hass, "print_barcode", _do_print, cut=cut, feed=feed)
 
     async def beep(self, hass: HomeAssistant, *, times: int = 2, duration: int = 4) -> None:
         times_v = validate_numeric_input(times, 1, MAX_BEEP_TIMES, "times")
@@ -862,15 +817,4 @@ class EscposPrinterAdapter:
             except AttributeError:
                 _LOGGER.warning("Printer does not support buzzer")
 
-        async with self._lock:
-            printer = (self._printer if self._keepalive and self._printer is not None
-                       else await hass.async_add_executor_job(self._connect))
-            try:
-                await hass.async_add_executor_job(_beep_inner, printer)
-                # Submit to CUPS
-                if not self._keepalive:
-                    job_id = await self._submit_job(printer)
-                    _LOGGER.debug("CUPS job submitted for beep: %s", job_id)
-            except Exception as e:
-                _LOGGER.error("beep failed: %s", sanitize_log_message(str(e)))
-                raise
+        await self._run_job(hass, "beep", _beep_inner, apply_cut_feed=False)

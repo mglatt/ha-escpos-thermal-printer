@@ -76,3 +76,34 @@ async def test_configured_timeout_reaches_ipp(hass):  # type: ignore[no-untyped-
 
     # 7.4 rounds to pyipp's integer request_timeout of 7
     assert fake_ipp_class.last_request_timeout == 7
+
+
+async def test_failed_op_does_not_mark_success(hass):  # type: ignore[no-untyped-def]
+    """A failing job must raise and must not flip the Online status to on."""
+    import pytest
+    from homeassistant.exceptions import HomeAssistantError
+
+    entry = await _setup_entry(hass)
+    adapter = hass.data[DOMAIN][entry.entry_id]["adapter"]
+
+    fake = MagicMock()
+    fake.cut.side_effect = RuntimeError("cutter jammed")
+    with patch("escpos.printer.Dummy", return_value=fake):
+        with pytest.raises(HomeAssistantError):
+            await hass.services.async_call(DOMAIN, "cut", {"mode": "full"}, blocking=True)
+
+    assert adapter.get_status() is not True
+
+
+async def test_successful_qr_marks_success_and_notifies(hass):  # type: ignore[no-untyped-def]
+    """Any successful job (not just print_text) marks the printer reachable."""
+    entry = await _setup_entry(hass)
+    adapter = hass.data[DOMAIN][entry.entry_id]["adapter"]
+
+    seen: list[bool] = []
+    adapter.add_status_listener(seen.append)
+
+    await hass.services.async_call(DOMAIN, "print_qr", {"data": "hello"}, blocking=True)
+
+    assert adapter.get_status() is True
+    assert seen and seen[-1] is True
