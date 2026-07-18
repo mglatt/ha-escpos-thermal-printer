@@ -25,7 +25,6 @@ from .const import (
     CONF_CUPS_SERVER,
     CONF_DEFAULT_ALIGN,
     CONF_DEFAULT_CUT,
-    CONF_KEEPALIVE,
     CONF_LINE_WIDTH,
     CONF_PRINTER_NAME,
     CONF_PROFILE,
@@ -607,10 +606,6 @@ class EscposOptionsFlowHandler(config_entries.OptionsFlow):
                     ),
                 ): vol.In(["left", "center", "right"]),
                 vol.Optional(CONF_DEFAULT_CUT, default=current_cut): vol.In(cut_choices),
-                vol.Optional(
-                    CONF_KEEPALIVE,
-                    default=self.config_entry.options.get(CONF_KEEPALIVE, False),
-                ): bool,
                 vol.Optional(
                     CONF_STATUS_INTERVAL,
                     default=self.config_entry.options.get(CONF_STATUS_INTERVAL, 0),

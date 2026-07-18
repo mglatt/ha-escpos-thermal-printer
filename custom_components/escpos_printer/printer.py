@@ -286,9 +286,7 @@ class EscposPrinterAdapter:
         )
         return job_id
 
-    async def start(self, hass: HomeAssistant, *, keepalive: bool, status_interval: int) -> None:
-        # Note: keepalive is ignored for Dummy+CUPS approach - we always submit fresh
-        self._keepalive = False  # Force non-keepalive for Dummy printer approach
+    async def start(self, hass: HomeAssistant, *, status_interval: int) -> None:
         self._status_interval = max(0, int(status_interval))
 
         # Schedule status checks

@@ -8,7 +8,6 @@ from custom_components.escpos_printer.const import (
     CONF_CODEPAGE,
     CONF_DEFAULT_ALIGN,
     CONF_DEFAULT_CUT,
-    CONF_KEEPALIVE,
     CONF_PRINTER_NAME,
     CONF_STATUS_INTERVAL,
     CONF_TIMEOUT,
@@ -38,7 +37,6 @@ async def test_options_flow_update(hass):  # type: ignore[no-untyped-def]
             CONF_CODEPAGE: "CP437",
             CONF_DEFAULT_ALIGN: "center",
             CONF_DEFAULT_CUT: "partial",
-            CONF_KEEPALIVE: True,
             CONF_STATUS_INTERVAL: 30,
         },
     )
