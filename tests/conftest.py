@@ -75,8 +75,6 @@ def fake_escpos_module(request: Any) -> Generator[None, None, None]:
         def _raw(self, data: bytes = b"", *_, **__):  # type: ignore[no-untyped-def]
             self._buffer += data
 
-    # Keep CupsPrinter for backwards compatibility in tests
-    printer.CupsPrinter = _FakeDummyPrinter  # type: ignore[attr-defined]
     printer.Dummy = _FakeDummyPrinter  # type: ignore[attr-defined]
     escpos.printer = printer  # type: ignore[attr-defined]
 
@@ -110,10 +108,6 @@ def fake_pyipp_module(request: Any) -> Generator[None, None, None]:
     class _FakeGroup:
         def __init__(self, attributes: dict[str, Any]) -> None:
             self.attributes = attributes
-
-    class _FakeResponse:
-        def __init__(self, groups: list[Any]) -> None:
-            self.groups = groups
 
     class _FakeState:
         def __init__(self) -> None:
