@@ -10,8 +10,8 @@ import textwrap
 import time
 from typing import Any
 
-import aiohttp
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.util import dt as dt_util
 from PIL import Image
 
@@ -38,6 +38,46 @@ def _get_dummy_printer() -> type[Any]:
     from escpos.printer import Dummy  # noqa: PLC0415
 
     return Dummy  # type: ignore[no-any-return]
+
+
+_MAX_IMAGE_WIDTH = 512
+
+
+def _resize_if_wide(img: Image.Image) -> Image.Image:
+    """Scale *img* down to the maximum printable width, keeping aspect ratio.
+
+    Blocking (PIL); run in an executor.
+    """
+    try:
+        orig_w, orig_h = img.width, img.height
+        if orig_w > _MAX_IMAGE_WIDTH:
+            ratio = _MAX_IMAGE_WIDTH / float(orig_w)
+            new_size = (_MAX_IMAGE_WIDTH, int(orig_h * ratio))
+            img = img.resize(new_size)
+            _LOGGER.debug("Resized image from %sx%s to %sx%s", orig_w, orig_h, new_size[0], new_size[1])
+    except Exception as e:
+        _LOGGER.debug("Image resize failed, printing original size: %s", sanitize_log_message(str(e)))
+    return img
+
+
+def _decode_image_bytes(content: bytes) -> Image.Image:
+    """Decode downloaded image bytes and resize if needed.
+
+    Blocking (PIL); run in an executor.
+    """
+    img = Image.open(io.BytesIO(content))
+    img.load()
+    return _resize_if_wide(img)
+
+
+def _load_image_file(path: str) -> Image.Image:
+    """Open a local image file and resize if needed.
+
+    Blocking (PIL); run in an executor.
+    """
+    img = Image.open(path)
+    img.load()
+    return _resize_if_wide(img)
 
 
 def _ipp_timeout(timeout: float) -> int:
@@ -652,38 +692,21 @@ class EscposPrinterAdapter:
         if image.lower().startswith(("http://", "https://")):
             _LOGGER.debug("Downloading image from URL: %s", sanitize_log_message(image, ["text", "data"]))
             url = validate_image_url(image)
-            # Use a local ClientSession to avoid depending on HA http component in unit tests
-            session = aiohttp.ClientSession()
+            session = async_get_clientsession(hass)
+            resp = await session.get(url)
             try:
-                resp = await session.get(url)
-                try:
-                    resp.raise_for_status()
-                    content = await resp.read()
-                finally:
-                    with contextlib.suppress(Exception):
-                        resp.close()
+                resp.raise_for_status()
+                content = await resp.read()
             finally:
                 with contextlib.suppress(Exception):
-                    await session.close()
-            img_obj = Image.open(io.BytesIO(content))
+                    resp.release()
+            img_obj = await hass.async_add_executor_job(_decode_image_bytes, content)
         else:
             _LOGGER.debug("Opening local image: %s", image)
             path = validate_local_image_path(image)
-            img_obj = await hass.async_add_executor_job(Image.open, path)
+            img_obj = await hass.async_add_executor_job(_load_image_file, path)
 
         align_m = self._map_align(align)
-
-        # Resize overly wide images to a sane default (e.g., 512px)
-        try:
-            max_width = 512
-            orig_w, orig_h = img_obj.width, img_obj.height
-            if orig_w > max_width:
-                ratio = max_width / float(orig_w)
-                new_size = (max_width, int(orig_h * ratio))
-                img_obj = img_obj.resize(new_size)
-                _LOGGER.debug("Resized image from %sx%s to %sx%s", orig_w, orig_h, new_size[0], new_size[1])
-        except Exception:
-            pass
 
         def _do_print(printer: Any) -> None:
             if hasattr(printer, "set"):

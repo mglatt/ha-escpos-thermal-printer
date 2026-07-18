@@ -30,3 +30,33 @@ async def test_print_image_service_local(hass, tmp_path):  # type: ignore[no-unt
             blocking=True,
         )
     assert fake.image.called
+
+
+async def test_print_image_service_url(hass, aioclient_mock):  # type: ignore[no-untyped-def]
+    """Downloading via HA's shared aiohttp session and decoding in the executor."""
+    import io
+
+    buf = io.BytesIO()
+    Image.new("RGB", (10, 10)).save(buf, format="PNG")
+    aioclient_mock.get("https://example.com/img.png", content=buf.getvalue())
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="UrlPrinter",
+        data={CONF_PRINTER_NAME: "UrlPrinter"},
+        unique_id="cups_UrlPrinter",
+    )
+    entry.add_to_hass(hass)
+    with patch("escpos.printer.Dummy"):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    fake = MagicMock()
+    with patch("escpos.printer.Dummy", return_value=fake):
+        await hass.services.async_call(
+            DOMAIN,
+            "print_image",
+            {"image": "https://example.com/img.png"},
+            blocking=True,
+        )
+    assert fake.image.called
