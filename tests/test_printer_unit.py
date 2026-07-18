@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sys
-from typing import Any
+from typing import Any, Self
 from unittest.mock import AsyncMock
 
 import pytest
@@ -91,7 +91,7 @@ class _RaisingIPP:
     def __init__(self, uri: str, **kwargs: Any) -> None:
         pass
 
-    async def __aenter__(self) -> _RaisingIPP:
+    async def __aenter__(self) -> Self:
         return self
 
     async def __aexit__(self, *args: Any) -> None:

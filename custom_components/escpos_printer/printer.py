@@ -619,7 +619,7 @@ class EscposPrinterAdapter:
         self._mark_success()
 
     # Operations
-    async def print_text(  # noqa: PLR0915
+    async def print_text(
         self,
         hass: HomeAssistant,
         *,
@@ -725,7 +725,7 @@ class EscposPrinterAdapter:
 
         await self._run_job(hass, "print_qr", _do_print, cut=cut, feed=feed)
 
-    async def print_image(  # noqa: PLR0915
+    async def print_image(
         self,
         hass: HomeAssistant,
         *,

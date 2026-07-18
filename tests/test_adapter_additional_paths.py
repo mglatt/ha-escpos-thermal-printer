@@ -80,8 +80,8 @@ async def test_configured_timeout_reaches_ipp(hass):  # type: ignore[no-untyped-
 
 async def test_failed_op_does_not_mark_success(hass):  # type: ignore[no-untyped-def]
     """A failing job must raise and must not flip the Online status to on."""
-    import pytest
     from homeassistant.exceptions import HomeAssistantError
+    import pytest
 
     entry = await _setup_entry(hass)
     adapter = hass.data[DOMAIN][entry.entry_id]["adapter"]
@@ -106,4 +106,5 @@ async def test_successful_qr_marks_success_and_notifies(hass):  # type: ignore[n
     await hass.services.async_call(DOMAIN, "print_qr", {"data": "hello"}, blocking=True)
 
     assert adapter.get_status() is True
-    assert seen and seen[-1] is True
+    assert seen
+    assert seen[-1] is True
