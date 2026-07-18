@@ -123,7 +123,7 @@ class EscposConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             _LOGGER.debug(
                 "Checking CUPS printer availability: %s on server %s", printer_name, self._cups_server or "localhost"
             )
-            ok = await is_cups_printer_available(printer_name, self._cups_server)
+            ok = await is_cups_printer_available(printer_name, self._cups_server, timeout=timeout)
             if ok:
                 _LOGGER.debug("CUPS printer '%s' is available", printer_name)
 

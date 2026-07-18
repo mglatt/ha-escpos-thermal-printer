@@ -15,7 +15,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 from PIL import Image
 
-from .const import DEFAULT_ALIGN, DEFAULT_CUT
+from .const import DEFAULT_ALIGN, DEFAULT_CUT, DEFAULT_TIMEOUT
 from .security import (
     MAX_BEEP_TIMES,
     MAX_FEED_LINES,
@@ -40,6 +40,14 @@ def _get_dummy_printer() -> type[Any]:
     return Dummy  # type: ignore[no-any-return]
 
 
+def _ipp_timeout(timeout: float) -> int:
+    """Convert the configured timeout (float seconds) to pyipp's int request_timeout.
+
+    Sub-second values round up to 1 second, pyipp's minimum granularity.
+    """
+    return max(1, round(timeout))
+
+
 def _build_printer_uri(printer_name: str, server: str | None = None) -> str:
     """Build an IPP URI for a CUPS printer queue."""
     host = server or "localhost"
@@ -56,13 +64,19 @@ def _build_root_uri(server: str | None = None) -> str:
     return f"ipp://{host}/"
 
 
-async def _submit_to_cups(printer_name: str, data: bytes, server: str | None = None) -> int:
+async def _submit_to_cups(
+    printer_name: str,
+    data: bytes,
+    server: str | None = None,
+    timeout: float = DEFAULT_TIMEOUT,
+) -> int:
     """Submit raw ESC/POS bytes to a CUPS printer via IPP.
 
     Args:
         printer_name: CUPS printer queue name.
         data: Raw ESC/POS bytes to send.
         server: CUPS server address ('host' or 'host:port'). None means localhost.
+        timeout: IPP request timeout in seconds.
 
     Returns:
         IPP job ID.
@@ -71,7 +85,7 @@ async def _submit_to_cups(printer_name: str, data: bytes, server: str | None = N
     from pyipp.enums import IppOperation  # noqa: PLC0415
 
     uri = _build_printer_uri(printer_name, server)
-    async with IPP(uri) as ipp:
+    async with IPP(uri, request_timeout=_ipp_timeout(timeout)) as ipp:
         response = await ipp.execute(
             IppOperation.PRINT_JOB,
             {
@@ -88,11 +102,12 @@ async def _submit_to_cups(printer_name: str, data: bytes, server: str | None = N
     return job_id
 
 
-async def is_cups_available(server: str | None = None) -> bool:
+async def is_cups_available(server: str | None = None, timeout: float = DEFAULT_TIMEOUT) -> bool:
     """Return True if the CUPS server at *server* is reachable via IPP.
 
     Args:
         server: CUPS server address. None means localhost.
+        timeout: IPP request timeout in seconds.
 
     Returns:
         True if the server responds to IPP requests.
@@ -102,7 +117,7 @@ async def is_cups_available(server: str | None = None) -> bool:
         from pyipp.enums import IppOperation  # noqa: PLC0415
 
         uri = _build_root_uri(server)
-        async with IPP(uri) as ipp:
+        async with IPP(uri, request_timeout=_ipp_timeout(timeout)) as ipp:
             await ipp.raw(
                 IppOperation.CUPS_GET_PRINTERS,
                 {"operation-attributes-tag": {}},
@@ -116,11 +131,12 @@ async def is_cups_available(server: str | None = None) -> bool:
         return False
 
 
-async def get_cups_printers(server: str | None = None) -> list[str]:
+async def get_cups_printers(server: str | None = None, timeout: float = DEFAULT_TIMEOUT) -> list[str]:
     """Return printer names registered on the CUPS server.
 
     Args:
         server: CUPS server address. None means localhost.
+        timeout: IPP request timeout in seconds.
 
     Returns:
         List of CUPS printer queue names.
@@ -130,7 +146,7 @@ async def get_cups_printers(server: str | None = None) -> list[str]:
         from pyipp.enums import IppOperation  # noqa: PLC0415
 
         uri = _build_root_uri(server)
-        async with IPP(uri) as ipp:
+        async with IPP(uri, request_timeout=_ipp_timeout(timeout)) as ipp:
             response = await ipp.execute(
                 IppOperation.CUPS_GET_PRINTERS,
                 {"operation-attributes-tag": {}},
@@ -150,12 +166,17 @@ async def get_cups_printers(server: str | None = None) -> list[str]:
         return []
 
 
-async def is_cups_printer_available(printer_name: str, server: str | None = None) -> bool:
+async def is_cups_printer_available(
+    printer_name: str,
+    server: str | None = None,
+    timeout: float = DEFAULT_TIMEOUT,
+) -> bool:
     """Return True if *printer_name* exists on the CUPS server.
 
     Args:
         printer_name: CUPS queue name.
         server: CUPS server address. None means localhost.
+        timeout: IPP request timeout in seconds.
 
     Returns:
         True if the printer responds to Get-Printer-Attributes.
@@ -164,7 +185,7 @@ async def is_cups_printer_available(printer_name: str, server: str | None = None
         from pyipp import IPP  # noqa: PLC0415
 
         uri = _build_printer_uri(printer_name, server)
-        async with IPP(uri) as ipp:
+        async with IPP(uri, request_timeout=_ipp_timeout(timeout)) as ipp:
             await ipp.printer()
         return True
     except ImportError:
@@ -175,12 +196,17 @@ async def is_cups_printer_available(printer_name: str, server: str | None = None
         return False
 
 
-async def get_cups_printer_status(printer_name: str, server: str | None = None) -> tuple[bool, str | None]:
+async def get_cups_printer_status(
+    printer_name: str,
+    server: str | None = None,
+    timeout: float = DEFAULT_TIMEOUT,
+) -> tuple[bool, str | None]:
     """Return (is_available, error_message) for *printer_name*.
 
     Args:
         printer_name: CUPS queue name.
         server: CUPS server address. None means localhost.
+        timeout: IPP request timeout in seconds.
 
     Returns:
         Tuple of (printer_ok, error_message). error_message is None when ok.
@@ -189,7 +215,7 @@ async def get_cups_printer_status(printer_name: str, server: str | None = None) 
         from pyipp import IPP  # noqa: PLC0415
 
         uri = _build_printer_uri(printer_name, server)
-        async with IPP(uri) as ipp:
+        async with IPP(uri, request_timeout=_ipp_timeout(timeout)) as ipp:
             printer = await ipp.printer()
 
         state = getattr(printer, "state", None)
@@ -282,7 +308,8 @@ class EscposPrinterAdapter:
         job_id = await _submit_to_cups(
             self._config.printer_name,
             data,
-            self._config.cups_server
+            self._config.cups_server,
+            timeout=self._config.timeout,
         )
         return job_id
 
@@ -313,7 +340,11 @@ class EscposPrinterAdapter:
     async def _status_check(self, hass: HomeAssistant) -> None:
         # CUPS printer status check via IPP (native async, no executor needed)
         start = time.perf_counter()
-        ok, err = await get_cups_printer_status(self._config.printer_name, self._config.cups_server)
+        ok, err = await get_cups_printer_status(
+            self._config.printer_name,
+            self._config.cups_server,
+            timeout=self._config.timeout,
+        )
         latency_ms = int((time.perf_counter() - start) * 1000)
         now = dt_util.utcnow()
         self._last_check = now

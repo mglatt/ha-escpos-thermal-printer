@@ -135,8 +135,11 @@ def fake_pyipp_module(request: Any) -> Generator[None, None, None]:
             self.printers: list[Any] = []
 
     class _FakeIPP:
+        last_request_timeout: int | None = None
+
         def __init__(self, uri: str, **kwargs: Any) -> None:
             self._uri = uri
+            type(self).last_request_timeout = kwargs.get("request_timeout")
 
         async def __aenter__(self) -> "_FakeIPP":
             return self

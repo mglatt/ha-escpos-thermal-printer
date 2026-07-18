@@ -50,3 +50,29 @@ async def test_beep_success_branch(hass, caplog):  # type: ignore[no-untyped-def
         await hass.services.async_call(DOMAIN, "beep", {"times": 2, "duration": 3}, blocking=True)
     fake.buzzer.assert_called()
     assert any("beep begin" in rec.message for rec in caplog.records)
+
+
+async def test_configured_timeout_reaches_ipp(hass):  # type: ignore[no-untyped-def]
+    """The config entry timeout must be passed to pyipp as request_timeout."""
+    import sys
+
+    from custom_components.escpos_printer.const import CONF_TIMEOUT
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="TimeoutPrinter",
+        data={CONF_PRINTER_NAME: "TimeoutPrinter", CONF_TIMEOUT: 7.4},
+        unique_id="cups_TimeoutPrinter",
+    )
+    entry.add_to_hass(hass)
+    with patch("escpos.printer.Dummy"):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    fake_ipp_class = sys.modules["pyipp"].IPP
+    fake_ipp_class.last_request_timeout = None
+
+    await hass.services.async_call(DOMAIN, "feed", {"lines": 1}, blocking=True)
+
+    # 7.4 rounds to pyipp's integer request_timeout of 7
+    assert fake_ipp_class.last_request_timeout == 7
