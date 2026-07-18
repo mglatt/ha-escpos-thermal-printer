@@ -70,6 +70,11 @@ async def test_duplicate_unique_id_aborts(hass):  # type: ignore[no-untyped-def]
     ):
         result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
         assert result["type"] == "form"
+        assert result["step_id"] == "user"
+
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
+        assert result["type"] == "form"
+        assert result["step_id"] == "printer"
 
         result2 = await hass.config_entries.flow.async_configure(
             result["flow_id"], {CONF_PRINTER_NAME: "TestPrinter"}

@@ -14,8 +14,20 @@ from custom_components.escpos_printer.const import (
 )
 
 
+async def _start_flow_at_printer_step(hass):  # type: ignore[no-untyped-def]
+    """Start a user flow and submit the CUPS server step (default localhost)."""
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
+    assert result["type"] == "form"
+    assert result["step_id"] == "user"
+
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
+    assert result["type"] == "form"
+    assert result["step_id"] == "printer"
+    return result
+
+
 async def test_config_flow_success(hass):  # type: ignore[no-untyped-def]
-    """Test successful two-step config flow."""
+    """Test successful multi-step config flow."""
     with (
         patch(
             "custom_components.escpos_printer.config_flow.get_cups_printers",
@@ -26,12 +38,7 @@ async def test_config_flow_success(hass):  # type: ignore[no-untyped-def]
             return_value=True,
         ),
     ):
-        # Step 1: User step - CUPS printer selection and profile
-        result = await hass.config_entries.flow.async_init(
-            DOMAIN, context={"source": "user"}
-        )
-        assert result["type"] == "form"
-        assert result["step_id"] == "user"
+        result = await _start_flow_at_printer_step(hass)
 
         result2 = await hass.config_entries.flow.async_configure(
             result["flow_id"],
@@ -42,7 +49,6 @@ async def test_config_flow_success(hass):  # type: ignore[no-untyped-def]
         assert result2["type"] == "form"
         assert result2["step_id"] == "codepage"
 
-        # Step 2: Codepage step - encoding settings
         result3 = await hass.config_entries.flow.async_configure(
             result2["flow_id"],
             {
@@ -62,7 +68,7 @@ async def test_config_flow_success(hass):  # type: ignore[no-untyped-def]
 
 
 async def test_config_flow_connection_failure(hass):  # type: ignore[no-untyped-def]
-    """Test config flow with connection failure."""
+    """Test config flow with printer connection failure."""
     with (
         patch(
             "custom_components.escpos_printer.config_flow.get_cups_printers",
@@ -73,20 +79,16 @@ async def test_config_flow_connection_failure(hass):  # type: ignore[no-untyped-
             return_value=False,
         ),
     ):
-        result = await hass.config_entries.flow.async_init(
-            DOMAIN, context={"source": "user"}
-        )
-        assert result["type"] == "form"
-        assert result["step_id"] == "user"
+        result = await _start_flow_at_printer_step(hass)
 
         result2 = await hass.config_entries.flow.async_configure(
             result["flow_id"],
             {CONF_PRINTER_NAME: "TestPrinter"},
         )
 
-        # Should show form again with error
+        # Should show printer form again with error
         assert result2["type"] == "form"
-        assert result2["step_id"] == "user"
+        assert result2["step_id"] == "printer"
         assert result2["errors"]["base"] == "cannot_connect"
 
 
@@ -102,9 +104,7 @@ async def test_config_flow_with_profile_selection(hass):  # type: ignore[no-unty
             return_value=True,
         ),
     ):
-        result = await hass.config_entries.flow.async_init(
-            DOMAIN, context={"source": "user"}
-        )
+        result = await _start_flow_at_printer_step(hass)
 
         # Configure with a profile (using fallback 'default' profile)
         result2 = await hass.config_entries.flow.async_configure(
@@ -149,9 +149,7 @@ async def test_config_flow_custom_profile(hass):  # type: ignore[no-untyped-def]
             "custom_components.escpos_printer.config_flow.is_valid_profile", return_value=True
         ),
     ):
-        result = await hass.config_entries.flow.async_init(
-            DOMAIN, context={"source": "user"}
-        )
+        result = await _start_flow_at_printer_step(hass)
 
         # Select custom profile
         result2 = await hass.config_entries.flow.async_configure(
@@ -204,9 +202,7 @@ async def test_config_flow_custom_codepage(hass):  # type: ignore[no-untyped-def
             return_value=True,
         ),
     ):
-        result = await hass.config_entries.flow.async_init(
-            DOMAIN, context={"source": "user"}
-        )
+        result = await _start_flow_at_printer_step(hass)
 
         result2 = await hass.config_entries.flow.async_configure(
             result["flow_id"],
@@ -250,9 +246,7 @@ async def test_config_flow_custom_line_width(hass):  # type: ignore[no-untyped-d
             return_value=True,
         ),
     ):
-        result = await hass.config_entries.flow.async_init(
-            DOMAIN, context={"source": "user"}
-        )
+        result = await _start_flow_at_printer_step(hass)
 
         result2 = await hass.config_entries.flow.async_configure(
             result["flow_id"],

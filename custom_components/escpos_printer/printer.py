@@ -823,11 +823,14 @@ class EscposPrinterAdapter:
 
         def _beep_inner(printer: Any) -> None:
             _LOGGER.debug("beep begin: times=%s duration=%s", times_v, duration_v)
-            if hasattr(printer, "buzzer"):
-                printer.buzzer(times_v, duration_v)
-            elif hasattr(printer, "beep"):
-                printer.beep(times_v, duration_v)
-            else:
+            try:
+                if hasattr(printer, "buzzer"):
+                    printer.buzzer(times_v, duration_v)
+                elif hasattr(printer, "beep"):
+                    printer.beep(times_v, duration_v)
+                else:
+                    _LOGGER.warning("Printer does not support buzzer")
+            except AttributeError:
                 _LOGGER.warning("Printer does not support buzzer")
 
         async with self._lock:

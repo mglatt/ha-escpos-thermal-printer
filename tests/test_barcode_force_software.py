@@ -17,6 +17,10 @@ class FakePrinterAcceptFS:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str, dict[str, Any]]] = []
 
+    @property
+    def output(self) -> bytes:
+        return b"\x1dBC" if self.calls else b""
+
     def set(self, **kwargs: Any) -> None:
         pass
 
@@ -48,7 +52,7 @@ async def test_barcode_passes_force_software(monkeypatch: Any) -> None:
 
     from custom_components.escpos_printer import printer as printer_mod
 
-    monkeypatch.setattr(printer_mod, "_get_cups_printer", fake_cups)
+    monkeypatch.setattr(printer_mod, "_get_dummy_printer", fake_cups)
 
     adapter = EscposPrinterAdapter(PrinterConfig(printer_name="TestPrinter"))
     hass = HassStub()
@@ -85,7 +89,7 @@ async def test_barcode_retries_without_force_software(monkeypatch: Any) -> None:
 
     from custom_components.escpos_printer import printer as printer_mod
 
-    monkeypatch.setattr(printer_mod, "_get_cups_printer", fake_cups)
+    monkeypatch.setattr(printer_mod, "_get_dummy_printer", fake_cups)
 
     adapter = EscposPrinterAdapter(PrinterConfig(printer_name="TestPrinter"))
     hass = HassStub()

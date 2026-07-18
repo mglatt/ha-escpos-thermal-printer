@@ -98,6 +98,7 @@ def fake_pyipp_module(request: Any) -> Generator[None, None, None]:
         STOPPED = 5
 
     class _IppOperation(IntEnum):
+        PRINT_JOB = 0x0002
         CUPS_GET_DEFAULT = 0x4001
         CUPS_GET_PRINTERS = 0x4002
         GET_PRINTER_ATTRIBUTES = 0x000B
