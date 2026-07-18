@@ -14,7 +14,7 @@ This guide covers how to set up a development environment, run tests, and contri
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/cognitivegears/ha-escpos-thermal-printer.git
+git clone https://github.com/mglatt/ha-escpos-thermal-printer.git
 cd ha-escpos-thermal-printer
 ```
 

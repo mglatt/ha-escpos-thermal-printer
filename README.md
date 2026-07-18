@@ -1,13 +1,11 @@
 # ESC/POS Thermal Printer for Home Assistant
 
-[![Validate](https://github.com/cognitivegears/ha-escpos-thermal-printer/actions/workflows/validate.yml/badge.svg)](https://github.com/cognitivegears/ha-escpos-thermal-printer/actions/workflows/validate.yml)
-[![Hassfest](https://github.com/cognitivegears/ha-escpos-thermal-printer/actions/workflows/hassfest.yml/badge.svg)](https://github.com/cognitivegears/ha-escpos-thermal-printer/actions/workflows/hassfest.yml)
-[![HACS Validation](https://github.com/cognitivegears/ha-escpos-thermal-printer/actions/workflows/hacs.yml/badge.svg)](https://github.com/cognitivegears/ha-escpos-thermal-printer/actions/workflows/hacs.yml)
+[![Validate](https://github.com/mglatt/ha-escpos-thermal-printer/actions/workflows/validate.yml/badge.svg)](https://github.com/mglatt/ha-escpos-thermal-printer/actions/workflows/validate.yml)
+[![Hassfest](https://github.com/mglatt/ha-escpos-thermal-printer/actions/workflows/hassfest.yml/badge.svg)](https://github.com/mglatt/ha-escpos-thermal-printer/actions/workflows/hassfest.yml)
+[![HACS Validation](https://github.com/mglatt/ha-escpos-thermal-printer/actions/workflows/hacs.yml/badge.svg)](https://github.com/mglatt/ha-escpos-thermal-printer/actions/workflows/hacs.yml)
 
 Print receipts, labels, QR codes, and more from Home Assistant automations.
 Connect thermal printers via CUPS and start printing in minutes.
-
-![Printed Receipt Example](docs/assets/receipt.png)
 
 ## Why Use This?
 
@@ -92,7 +90,7 @@ If you don't have CUPS configured yet:
 1. Open HACS in Home Assistant
 2. Go to Integrations and click the menu (three dots)
 3. Select **Custom repositories**
-4. Add `https://github.com/cognitivegears/ha-escpos-thermal-printer` as an Integration
+4. Add `https://github.com/mglatt/ha-escpos-thermal-printer` as an Integration
 5. Search for "ESC/POS Thermal Printer" and install it
 6. Restart Home Assistant
 
@@ -388,8 +386,8 @@ script:
 
 ## Getting Help
 
-- **Issues**: [GitHub Issues](https://github.com/cognitivegears/ha-escpos-thermal-printer/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/cognitivegears/ha-escpos-thermal-printer/discussions)
+- **Issues**: [GitHub Issues](https://github.com/mglatt/ha-escpos-thermal-printer/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/mglatt/ha-escpos-thermal-printer/discussions)
 
 ## License
 
