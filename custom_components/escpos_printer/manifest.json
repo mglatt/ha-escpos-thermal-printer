@@ -5,10 +5,10 @@
     "@mglatt"
   ],
   "config_flow": true,
-  "documentation": "https://github.com/mglatt/ha-escpos-thermal-printer#readme",
+  "documentation": "https://github.com/mglatt/ha-escpos-thermal-printer-cups#readme",
   "integration_type": "service",
   "iot_class": "local_push",
-  "issue_tracker": "https://github.com/mglatt/ha-escpos-thermal-printer/issues",
+  "issue_tracker": "https://github.com/mglatt/ha-escpos-thermal-printer-cups/issues",
   "loggers": [
     "escpos"
   ],

@@ -382,7 +382,7 @@ feature doesn't work (like QR codes), the printer may not support it.
 If you've tried these solutions and still have issues:
 
 1. **Enable debug logging** and capture relevant log entries
-2. **Check existing issues** on [GitHub Issues](https://github.com/mglatt/ha-escpos-thermal-printer/issues)
+2. **Check existing issues** on [GitHub Issues](https://github.com/mglatt/ha-escpos-thermal-printer-cups/issues)
 3. **Create a new issue** with:
    - Your printer model
    - Home Assistant version
