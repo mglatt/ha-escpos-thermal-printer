@@ -1,4 +1,4 @@
-# ESC/POS Thermal Printer for Home Assistant
+# ESC/POS CUPS Thermal Printer Integration for Home Assistant
 
 [![Validate](https://github.com/mglatt/ha-escpos-thermal-printer/actions/workflows/validate.yml/badge.svg)](https://github.com/mglatt/ha-escpos-thermal-printer/actions/workflows/validate.yml)
 [![Hassfest](https://github.com/mglatt/ha-escpos-thermal-printer/actions/workflows/hassfest.yml/badge.svg)](https://github.com/mglatt/ha-escpos-thermal-printer/actions/workflows/hassfest.yml)
