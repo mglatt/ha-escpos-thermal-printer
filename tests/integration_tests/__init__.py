@@ -1,84 +1,29 @@
-"""ESCPOS Printer Integration Test Framework.
+"""Reusable ESC/POS output parsing and validation toolkit.
 
-This package provides a comprehensive framework for testing the Home Assistant
-ESCPOS thermal printer integration with realistic scenarios including:
+This package used to host a full integration-test framework that drove the
+integration against a direct-TCP ESC/POS printer emulator. That transport no
+longer matches the integration, which submits jobs to CUPS over IPP, so the
+socket server, resilience/performance suites, and the Home Assistant socket
+harness were removed.
 
-- Virtual printer emulator that simulates ESCPOS protocol
-- Home Assistant test environment for automation testing
-- Error simulation and recovery testing
-- Performance and concurrency testing
-- Comprehensive test utilities and fixtures
+What remains is the transport-independent, reusable core:
 
-The framework enables testing of real integration behavior rather than
-just mocked components, ensuring reliable operation in production scenarios.
+- ``emulator`` - an ESC/POS byte-stream parser and a parsed-command state model.
+- ``fixtures`` - helpers to generate ESC/POS test content and to assert on the
+  parsed output.
+
+These are intended as building blocks for a future CUPS/IPP-based test suite
+that validates the ESC/POS bytes the integration generates.
 """
 
-import importlib
-from typing import Any
-
-from .emulator import (
-    Command,
-    ErrorSimulator,
-    EscposCommandParser,
-    PrinterState,
-    PrintJob,
-    VirtualPrinter,
-    VirtualPrinterServer,
-    create_connection_error,
-    create_intermittent_error,
-    create_offline_error,
-    create_paper_out_error,
-    create_timeout_error,
-)
-
-
-# Lazy import HA environment to avoid dependency conflicts
-def _import_ha_environment() -> tuple[type[Any], type[Any], type[Any], type[Any]]:
-    """Import HA environment modules on demand."""
-    try:
-        from .ha_environment import (
-            AutomationTester,
-            HATestEnvironment,
-            NotificationTester,
-            StateChangeSimulator,
-        )
-        return HATestEnvironment, StateChangeSimulator, AutomationTester, NotificationTester
-    except ImportError as e:
-        raise ImportError(
-            f"Failed to import HA environment: {e}. "
-            "This may be due to Home Assistant dependency conflicts. "
-            "Try installing without 'pytest-homeassistant-custom-component' "
-            "or use only the virtual printer emulator."
-        ) from e
-
+from .emulator import Command, EscposCommandParser, PrinterState, PrintJob
 from .fixtures import MockDataGenerator, VerificationUtilities
-
-
-# Provide access to HA environment without importing on module load
-def get_ha_environment() -> Any:
-    """Get HA environment classes, importing them only when needed."""
-    return _import_ha_environment()
-
-__version__ = "1.0.0"
 
 __all__ = [
     'Command',
-    'ErrorSimulator',
     'EscposCommandParser',
     'MockDataGenerator',
     'PrintJob',
     'PrinterState',
-    # Test Utilities
     'VerificationUtilities',
-    'VirtualPrinter',
-    # Virtual Printer Emulator
-    'VirtualPrinterServer',
-    # Home Assistant Environment (lazy loaded)
-    '_import_ha_environment',  # Function to import HA components when needed
-    'create_connection_error',
-    'create_intermittent_error',
-    'create_offline_error',
-    'create_paper_out_error',
-    'create_timeout_error',
-    'get_ha_environment'      # Convenience function for HA components
 ]
