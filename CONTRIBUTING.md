@@ -60,13 +60,15 @@ pytest -q
 uv run pytest tests/test_services_text.py -v
 ```
 
-### Run Integration Tests
+### ESC/POS Output Parsing Toolkit
 
-Integration tests are excluded by default. To run them:
-
-```bash
-uv run pytest -m integration
-```
+`tests/integration_tests/` is no longer a runnable suite. It holds a reusable,
+transport-independent toolkit (an ESC/POS byte-stream parser, a parsed-command
+state model, and verification helpers) intended as a starting point for a future
+CUPS/IPP-based test suite. See its
+[README](tests/integration_tests/README.md) for details. The `integration`
+pytest marker is reserved for that future work and is excluded from the default
+run.
 
 ### Run with Coverage
 
@@ -125,14 +127,6 @@ Once running:
 3. Go to **Settings** > **Devices & services** > **Add Integration**
 4. Search for "ESC/POS Thermal Printer"
 
-### Framework Smoke Test
-
-Test basic framework functionality without a full Home Assistant instance:
-
-```bash
-uv run python scripts/framework_smoke_test.py
-```
-
 ## Project Structure
 
 ```
@@ -154,7 +148,7 @@ ha-escpos-thermal-printer/
 │       ├── strings.json         # UI strings
 │       └── text_utils.py        # UTF-8 transcoding
 ├── tests/
-│   ├── integration_tests/       # Full integration tests
+│   ├── integration_tests/       # Reusable ESC/POS output parsing & validation toolkit
 │   └── test_*.py                # Unit tests
 ├── scripts/                     # Utility scripts
 ├── docs/                        # Documentation
@@ -231,9 +225,11 @@ The test suite uses mocks for all printer operations. You don't need a physical 
 
 For manual testing, you can:
 
-1. Use a virtual printer emulator (see `tests/integration_tests/`)
-2. Connect a real printer to your network
-3. Use the binary sensor to verify connectivity without printing
+1. Set up a printer queue in CUPS (a real printer, or a virtual/PDF queue) and
+   point the integration at that CUPS server
+2. Use the binary sensor to verify connectivity without printing
+3. Inspect the generated ESC/POS bytes with the parsing toolkit in
+   `tests/integration_tests/`
 
 ## Troubleshooting Development Issues
 

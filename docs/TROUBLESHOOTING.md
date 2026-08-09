@@ -17,63 +17,73 @@ Solutions for common issues with the ESC/POS Thermal Printer integration.
 
 ## Connection Issues
 
-### "Cannot connect to printer"
+This integration talks to a **CUPS server** over IPP, and CUPS talks to the
+physical printer. Connection problems fall into two layers: Home Assistant → CUPS,
+and CUPS → printer.
 
-**Check network connectivity:**
+### "CUPS server unavailable" during setup
+
+Home Assistant could not reach the CUPS server you entered (or the local one).
+
+**Check CUPS is reachable from Home Assistant:**
 
 ```bash
 # From the Home Assistant host or container
-ping <PRINTER_IP>
-
-# Test the printer port
-telnet <PRINTER_IP> 9100
+# 631 is the IPP port CUPS listens on
+curl -s http://<CUPS_HOST>:631/printers/ | head
 ```
-
-If telnet connects and shows a blank screen, the printer is reachable. Press
-Ctrl+] then type `quit` to exit.
 
 **Common causes:**
 
-1. **Wrong IP address** - Print a network status page from your printer to
-verify the IP
-2. **Printer is off or sleeping** - Some printers enter sleep mode; try printing
-a test page from the printer itself
-3. **Firewall blocking port 9100** - Check firewall rules on your network
-4. **Printer on different subnet** - Make sure Home Assistant can reach the
-printer's network
+1. **Wrong server address** - Use `host` or `host:port`; leave the field blank
+   to use the local CUPS server (`localhost:631`)
+2. **CUPS not running** - Start/enable the CUPS service on that host
+3. **CUPS not listening remotely** - By default CUPS only listens on localhost;
+   configure `Listen`/`Port` and `Allow` directives in `cupsd.conf` to accept
+   remote connections
+4. **Firewall blocking port 631** - Allow IPP (TCP 631) between Home Assistant
+   and the CUPS host
+
+### "pyipp library not available"
+
+The `pyipp` dependency failed to install. Reinstall the integration or check the
+Home Assistant logs for the dependency installation error.
+
+### No printers listed during setup
+
+CUPS is reachable but reports no print queues.
+
+**Solutions:**
+
+- Add your printer to CUPS first (see the [main README](../README.md)), then
+  restart the setup
+- Verify the queues exist: open `http://<CUPS_HOST>:631/printers` or run
+  `lpstat -p` on the CUPS host
+
+### Jobs are accepted but nothing prints
+
+Home Assistant reaches CUPS, but CUPS cannot deliver the job to the printer.
+
+**Check:**
+
+- The queue is not paused or stopped: `lpstat -p <queue>` (resume with
+  `cupsenable <queue>`)
+- CUPS can reach the physical device - check the printer's connection
+  (USB cable, or the `socket://ip:9100` network address configured in CUPS)
+- The printer is not in an error state (paper out, cover open)
+- The CUPS error log for details: `/var/log/cups/error_log`
+
+Try printing a CUPS test page from the CUPS web interface to isolate whether the
+problem is on the CUPS → printer side.
+
+### Timeouts
+
+The CUPS server is taking too long to respond.
 
 **Solutions:**
 
 - Increase the timeout value in integration options (try 8-10 seconds)
-- Assign a static IP to your printer to prevent IP changes
-- Check that port 9100 is not blocked by your router or firewall
-
-### Connection works sometimes, fails other times
-
-**Possible causes:**
-
-- DHCP lease expiring and printer getting a new IP
-- Printer entering sleep mode
-- Network congestion or instability
-
-**Solutions:**
-
-- Assign a static IP address to the printer
-- Disable sleep mode on the printer if possible
-- Enable the "Keep Alive" option (experimental)
 - Use the Status Interval option to detect when the printer goes offline
-
-### "Connection refused"
-
-The printer is reachable but rejecting connections.
-
-**Check:**
-
-- Another application might be using the printer
-- The printer might have a connection limit
-- The printer might be in an error state (paper out, cover open)
-
-Try power cycling the printer.
 
 ---
 

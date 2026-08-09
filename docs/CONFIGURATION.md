@@ -14,22 +14,36 @@ This guide covers all configuration options for the ESC/POS Thermal Printer inte
 
 ## Initial Setup
 
+### Prerequisites
+
+This integration prints through **CUPS**. Before adding it, make sure your
+printer is already set up as a print queue in CUPS (see the [main README](../README.md)
+for how to add USB, network, or serial printers to CUPS). The integration then
+submits raw ESC/POS jobs to that queue over IPP.
+
 ### Adding a Printer
 
 1. Go to **Settings** > **Devices & services** > **Add Integration**
 2. Search for "ESC/POS Thermal Printer"
-3. Enter the connection details
+3. Work through the setup steps below
 
-### Connection Settings (Step 1)
+### CUPS Server (Step 1)
 
 | Setting | Description | Default |
 |---------|-------------|---------|
-| Host | IP address or hostname of your printer | Required |
-| Port | TCP port number | 9100 |
+| CUPS Server | Address of the CUPS server as `host` or `host:port`. Leave blank to use the local CUPS server (`localhost:631`). | `localhost` |
+
+The integration probes the server and only continues if it responds to IPP.
+
+### Printer (Step 2)
+
+| Setting | Description | Default |
+|---------|-------------|---------|
+| Printer | The CUPS print queue to use, chosen from the queues found on the server | Required |
 | Timeout | IPP request timeout for CUPS operations, in seconds | 4.0 |
 | Printer Profile | Your printer model (see [Printer Profiles](#printer-profiles)) | Auto-detect |
 
-### Printer Settings (Step 2)
+### Printer Settings (Step 3)
 
 | Setting | Description | Default |
 |---------|-------------|---------|
@@ -38,16 +52,15 @@ This guide covers all configuration options for the ESC/POS Thermal Printer inte
 | Default Alignment | Text alignment for all print jobs | left |
 | Default Cut Mode | Paper cutting after print jobs | none |
 
-### Finding Your Printer's IP Address
+### Finding Your Printer's Queue Name
 
-Most thermal printers can print a network status page:
+The queue dropdown is populated from the printers registered on the CUPS server.
+To see or manage the available queues:
 
-1. Turn off the printer
-2. Hold the feed button while turning it on
-3. The printer will print its network configuration
-4. Look for the IP address on the printout
+- Open the CUPS web interface at `http://<cups-server>:631/printers`, or
+- Run `lpstat -p` on the CUPS host to list queue names.
 
-Alternatively, check your router's DHCP client list.
+If no printers appear, add your printer to CUPS first, then restart the setup.
 
 ---
 
@@ -70,7 +83,7 @@ Choose "Auto-detect" if your printer isn't listed. Choose "Custom" to enter a pr
 
 IPP request timeout for CUPS operations, in seconds. Increase this if you have:
 
-- A slow network connection
+- A slow or busy CUPS server
 - A printer that takes time to wake up
 - Intermittent connection issues
 
@@ -120,15 +133,6 @@ Applied when a service call doesn't specify cut mode:
 - `none` - No cutting (default)
 - `partial` - Partial cut (leaves a small connection)
 - `full` - Full cut
-
-### Keep Alive (Experimental)
-
-Maintains a persistent connection to the printer. This can:
-
-- Reduce print latency
-- Cause issues if the printer goes offline
-
-Leave disabled unless you have a specific need.
 
 ### Status Interval
 
