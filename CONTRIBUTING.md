@@ -14,8 +14,8 @@ This guide covers how to set up a development environment, run tests, and contri
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/mglatt/ha-escpos-thermal-printer.git
-cd ha-escpos-thermal-printer
+git clone https://github.com/mglatt/ha-escpos-thermal-printer-cups.git
+cd ha-escpos-thermal-printer-cups
 ```
 
 ### 2. Install Dependencies
@@ -130,7 +130,7 @@ Once running:
 ## Project Structure
 
 ```
-ha-escpos-thermal-printer/
+ha-escpos-thermal-printer-cups/
 ├── custom_components/
 │   └── escpos_printer/
 │       ├── __init__.py          # Integration setup, entry points
