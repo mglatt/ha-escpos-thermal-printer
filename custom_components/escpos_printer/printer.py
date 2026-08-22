@@ -363,17 +363,36 @@ class EscposPrinterAdapter:
         """
         _LOGGER.debug("Creating Dummy printer for CUPS submission to: %s", self._config.printer_name)
         dummy_class = _get_dummy_printer()
-        profile_obj = None
+        profile_name: str | None = None
         if self._config.profile:
             try:
-                from escpos import profile as escpos_profile  # noqa: PLC0415
+                from .capabilities import resolve_profile_name  # noqa: PLC0415
+                from .custom_profiles import register_custom_profiles  # noqa: PLC0415
 
-                profile_obj = escpos_profile.get_profile(self._config.profile)
+                # Custom profiles (RP820, TM-m30III, ...) must be in the
+                # registry before Escpos resolves the name, and stored
+                # clone aliases resolve to their real profile key here so
+                # python-escpos only ever sees names it knows.
+                register_custom_profiles()
+                profile_name = resolve_profile_name(self._config.profile) or self._config.profile
             except Exception as e:
-                _LOGGER.debug("Unknown printer profile '%s': %s", self._config.profile, sanitize_log_message(str(e)))
-                profile_obj = None
+                _LOGGER.debug(
+                    "Could not resolve printer profile '%s': %s",
+                    self._config.profile,
+                    sanitize_log_message(str(e)),
+                )
+                profile_name = self._config.profile
 
-        printer = dummy_class(profile=profile_obj)
+        # Escpos.__init__ takes the profile *name* and resolves it itself.
+        try:
+            printer = dummy_class(profile=profile_name)
+        except Exception as e:
+            _LOGGER.warning(
+                "Unknown printer profile '%s', printing without a profile: %s",
+                profile_name,
+                sanitize_log_message(str(e)),
+            )
+            printer = dummy_class()
         _LOGGER.debug("Dummy printer created: %s", printer)
         return printer
 
