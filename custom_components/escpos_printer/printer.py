@@ -68,6 +68,9 @@ def _get_dummy_printer() -> type[Any]:
 # profile-declared width is available (pre-existing behavior).
 _MAX_IMAGE_WIDTH = 512
 
+# Pillow moved resampling filters into Image.Resampling in 9.1
+_LANCZOS = getattr(Image, "Resampling", Image).LANCZOS
+
 
 def _resize_if_wide(img: Image.Image, max_width: int = _MAX_IMAGE_WIDTH) -> Image.Image:
     """Scale *img* down to the printable width, keeping aspect ratio.
@@ -79,7 +82,7 @@ def _resize_if_wide(img: Image.Image, max_width: int = _MAX_IMAGE_WIDTH) -> Imag
         if orig_w > max_width:
             ratio = max_width / float(orig_w)
             new_size = (max_width, int(orig_h * ratio))
-            img = img.resize(new_size, Image.LANCZOS)
+            img = img.resize(new_size, _LANCZOS)
             _LOGGER.debug("Resized image from %sx%s to %sx%s", orig_w, orig_h, new_size[0], new_size[1])
     except Exception as e:
         _LOGGER.debug("Image resize failed, printing original size: %s", sanitize_log_message(str(e)))
