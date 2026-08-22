@@ -430,6 +430,52 @@ def get_profile_features(profile_key: str | None) -> dict[str, bool]:
     return {k: bool(v) for k, v in features.items() if isinstance(v, bool)}
 
 
+# Preference order for automatic image-implementation selection. "graphics"
+# is deliberately absent: several profiles declare it but clone firmware
+# rarely implements GS ( L correctly, so it's opt-in only.
+_IMPL_PREFERENCE = ("bitImageRaster", "bitImageColumn")
+_IMAGE_FEATURES = ("bitImageRaster", "bitImageColumn", "graphics")
+
+
+def pick_impl(profile_key: str | None) -> str | None:
+    """Pick the image implementation the profile prefers.
+
+    Returns the first of ``_IMPL_PREFERENCE`` the profile's features
+    enable, or None when the profile declares neither (auto/custom/unknown
+    profiles have no feature data and also return None — the caller then
+    leaves the choice to python-escpos's default).
+    """
+    features = get_profile_features(profile_key)
+    for impl in _IMPL_PREFERENCE:
+        if features.get(impl):
+            return impl
+    return None
+
+
+def profile_declares_no_images(profile_key: str | None) -> bool:
+    """True when the profile explicitly declares no image support at all.
+
+    Auto/custom/unknown profiles (no feature data) are assumed capable.
+    Used for a warning only — profile flags are hints, never gates.
+    """
+    features = get_profile_features(profile_key)
+    if not features:
+        return False
+    return not any(features.get(f) for f in _IMAGE_FEATURES)
+
+
+def get_profile_pixel_width(profile_key: str | None) -> int | None:
+    """Return the profile's declared printable width in dots, if any."""
+    media = get_profile_info(profile_key).get("media", {})
+    try:
+        pixels = media.get("width", {}).get("pixels")
+    except AttributeError:
+        return None
+    if isinstance(pixels, int) and pixels > 0:
+        return pixels
+    return None
+
+
 # =============================================================================
 # Utility Functions
 # =============================================================================

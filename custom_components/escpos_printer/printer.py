@@ -64,44 +64,71 @@ def _get_dummy_printer() -> type[Any]:
     return Dummy  # type: ignore[no-any-return]
 
 
+# Fallback resize cap when neither a per-entry width override nor a
+# profile-declared width is available (pre-existing behavior).
 _MAX_IMAGE_WIDTH = 512
 
 
-def _resize_if_wide(img: Image.Image) -> Image.Image:
-    """Scale *img* down to the maximum printable width, keeping aspect ratio.
+def _resize_if_wide(img: Image.Image, max_width: int = _MAX_IMAGE_WIDTH) -> Image.Image:
+    """Scale *img* down to the printable width, keeping aspect ratio.
 
     Blocking (PIL); run in an executor.
     """
     try:
         orig_w, orig_h = img.width, img.height
-        if orig_w > _MAX_IMAGE_WIDTH:
-            ratio = _MAX_IMAGE_WIDTH / float(orig_w)
-            new_size = (_MAX_IMAGE_WIDTH, int(orig_h * ratio))
-            img = img.resize(new_size)
+        if orig_w > max_width:
+            ratio = max_width / float(orig_w)
+            new_size = (max_width, int(orig_h * ratio))
+            img = img.resize(new_size, Image.LANCZOS)
             _LOGGER.debug("Resized image from %sx%s to %sx%s", orig_w, orig_h, new_size[0], new_size[1])
     except Exception as e:
         _LOGGER.debug("Image resize failed, printing original size: %s", sanitize_log_message(str(e)))
     return img
 
 
-def _decode_image_bytes(content: bytes) -> Image.Image:
+def _decode_image_bytes(content: bytes, max_width: int = _MAX_IMAGE_WIDTH) -> Image.Image:
     """Decode downloaded image bytes and resize if needed.
 
     Blocking (PIL); run in an executor.
     """
     img = Image.open(io.BytesIO(content))
     img.load()
-    return _resize_if_wide(img)
+    return _resize_if_wide(img, max_width)
 
 
-def _load_image_file(path: str) -> Image.Image:
+def _load_image_file(path: str, max_width: int = _MAX_IMAGE_WIDTH) -> Image.Image:
     """Open a local image file and resize if needed.
 
     Blocking (PIL); run in an executor.
     """
     img = Image.open(path)
     img.load()
-    return _resize_if_wide(img)
+    return _resize_if_wide(img, max_width)
+
+
+# Cache of the kwarg names each printer class's image() accepts, probed via
+# inspect.signature. None means unintrospectable or **kwargs — pass everything.
+_IMAGE_KWARGS_CACHE: dict[type, frozenset[str] | None] = {}
+
+
+def _supported_image_kwargs(printer: Any) -> frozenset[str] | None:
+    """Return the kwarg names *printer*.image() accepts, or None to pass all."""
+    cls = type(printer)
+    if cls in _IMAGE_KWARGS_CACHE:
+        return _IMAGE_KWARGS_CACHE[cls]
+    supported: frozenset[str] | None
+    try:
+        import inspect  # noqa: PLC0415
+
+        params = inspect.signature(printer.image).parameters.values()
+        if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params):
+            supported = None
+        else:
+            supported = frozenset(p.name for p in params)
+    except (TypeError, ValueError):
+        supported = None
+    _IMAGE_KWARGS_CACHE[cls] = supported
+    return supported
 
 
 def _ipp_timeout(timeout: float) -> int:
@@ -331,6 +358,11 @@ class PrinterConfig:
     codepage: str | None = None
     profile: str | None = None
     line_width: int = 48
+    # Per-entry image width override in dots; None = profile width or fallback
+    width_pixels: int | None = None
+    # Resolved default image implementation (a python-escpos impl name);
+    # None = let python-escpos use its own default
+    impl: str | None = None
 
 
 class EscposPrinterAdapter:
@@ -348,6 +380,7 @@ class EscposPrinterAdapter:
         self._last_error: Any = None
         self._last_latency_ms: int | None = None
         self._last_error_reason: str | None = None
+        self._no_image_warned = False
 
     @property
     def config(self) -> PrinterConfig:
@@ -744,6 +777,18 @@ class EscposPrinterAdapter:
 
         await self._run_job(hass, "print_qr", _do_print, cut=cut, feed=feed)
 
+    def image_target_width(self) -> int:
+        """Effective resize target: entry override → profile width → fallback."""
+        if self._config.width_pixels:
+            return int(self._config.width_pixels)
+        try:
+            from .capabilities import get_profile_pixel_width  # noqa: PLC0415
+
+            profile_width = get_profile_pixel_width(self._config.profile)
+        except Exception:
+            profile_width = None
+        return profile_width or _MAX_IMAGE_WIDTH
+
     async def print_image(
         self,
         hass: HomeAssistant,
@@ -753,9 +798,11 @@ class EscposPrinterAdapter:
         align: str | None = None,
         cut: str | None = DEFAULT_CUT,
         feed: int | None = 0,
+        impl: str | None = None,
     ) -> None:
         # Resolve image source
         img_obj: Image.Image
+        max_width = self.image_target_width()
 
         if image.lower().startswith(("http://", "https://")):
             _LOGGER.debug("Downloading image from URL: %s", sanitize_log_message(image, ["text", "data"]))
@@ -768,20 +815,46 @@ class EscposPrinterAdapter:
             finally:
                 with contextlib.suppress(Exception):
                     resp.release()
-            img_obj = await hass.async_add_executor_job(_decode_image_bytes, content)
+            img_obj = await hass.async_add_executor_job(_decode_image_bytes, content, max_width)
         else:
             _LOGGER.debug("Opening local image: %s", image)
             path = validate_local_image_path(image)
-            img_obj = await hass.async_add_executor_job(_load_image_file, path)
+            img_obj = await hass.async_add_executor_job(_load_image_file, path, max_width)
 
         align_m = self._map_align(align)
+        # Service-call impl wins over the per-entry default; None leaves the
+        # choice to python-escpos.
+        effective_impl = impl or self._config.impl
+
+        # Profile flags are hints, not gates: warn once, print anyway.
+        if not self._no_image_warned:
+            try:
+                from .capabilities import profile_declares_no_images  # noqa: PLC0415
+
+                if profile_declares_no_images(self._config.profile):
+                    self._no_image_warned = True
+                    _LOGGER.warning(
+                        "Profile '%s' declares no image support; printing anyway",
+                        self._config.profile,
+                    )
+            except Exception:  # capability lookup must never block printing
+                pass
 
         def _do_print(printer: Any) -> None:
             if hasattr(printer, "set"):
                 printer.set(align=align_m)
             # Some printers need conversion; python-escpos handles PIL.Image
             if hasattr(printer, "image"):
-                printer.image(img_obj, high_density_vertical=high_density, high_density_horizontal=high_density)
+                kwargs: dict[str, Any] = {
+                    "high_density_vertical": high_density,
+                    "high_density_horizontal": high_density,
+                }
+                if effective_impl:
+                    kwargs["impl"] = effective_impl
+                supported = _supported_image_kwargs(printer)
+                if supported is not None:
+                    kwargs = {k: v for k, v in kwargs.items() if k in supported}
+                printer.image(img_obj, **kwargs)
             else:
                 # Fallback: convert to bytes via ESC/POS raster if possible
                 printer.text("[image printing not supported by this printer]\n")
